@@ -22,11 +22,15 @@ limits. To include the internet path, use a remote `iperf3` server you control.
 
 ## Wi-Fi run
 
-Find the Wi-Fi interface with `iw dev`, then run both directions:
+Find the Wi-Fi interface with `iw dev` and its local IP address with
+`ip -4 addr show dev <interface>`. Set `--interface` to select the interface
+for ping and `--bind` to keep the TCP test on that link:
 
 ```sh
-python3 tests/performance/benchmark_link.py 192.168.1.20 --interface wlx688fc9a24e57
-python3 tests/performance/benchmark_link.py 192.168.1.20 --interface wlx688fc9a24e57 --reverse
+python3 tests/performance/benchmark_link.py 192.168.1.20 \
+  --interface wlx688fc9a24e57 --bind 192.168.1.10
+python3 tests/performance/benchmark_link.py 192.168.1.20 \
+  --interface wlx688fc9a24e57 --bind 192.168.1.10 --reverse
 ```
 
 The output reports packet loss, min/average/max RTT, jitter, TCP throughput in

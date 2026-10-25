@@ -1,5 +1,8 @@
 # Driver safety regression checks
 
+For the repository-wide validation and performance procedures, see
+[TESTING.md](../../TESTING.md).
+
 Run the source-contract checks from the repository root:
 
 ```bash
