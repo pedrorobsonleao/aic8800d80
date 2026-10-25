@@ -106,6 +106,11 @@ reconexão. Quando disponíveis, use ferramentas de diagnóstico do kernel
 (por exemplo, KASAN, lockdep e UBSAN) em ambiente de teste. Não exponha uma
 máquina de uso diário a reproduções que possam travar o kernel.
 
+Execute também as verificações estruturais sem hardware com
+`python3 -m unittest discover -s tests/driver-safety -p 'test_*.py'`. Elas
+protegem os contratos das correções cobertas, mas não substituem compilação nem
+testes de runtime.
+
 Valide separadamente USB e SDIO quando o código corrigido for compartilhado ou
 quando ambos implementarem o mesmo contrato. Registre kernel, arquitetura,
 configuração, chipset/firmware e resultado. Uma compilação bem-sucedida não
