@@ -9578,6 +9578,8 @@ void rwnx_cfg80211_deinit(struct rwnx_hw *rwnx_hw)
 {
     struct mm_set_stack_start_cfm set_start_cfm;
     struct defrag_ctrl_info *defrag_ctrl = NULL;
+    struct defrag_ctrl_info *defrag_next = NULL;
+    LIST_HEAD(defrag_cleanup);
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -9613,22 +9615,24 @@ void rwnx_cfg80211_deinit(struct rwnx_hw *rwnx_hw)
 #endif
 
 
+    /* Detach entries while protected, then wait for their callbacks without
+     * holding defrag_lock. The callback takes this same lock before deciding
+     * whether it owns an entry.
+     */
     spin_lock_bh(&rwnx_hw->defrag_lock);
-    if (!list_empty(&rwnx_hw->defrag_list)) {
-        list_for_each_entry(defrag_ctrl, &rwnx_hw->defrag_list, list) {
-            list_del_init(&defrag_ctrl->list);
-            if (timer_pending(&defrag_ctrl->defrag_timer)) {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
-                timer_delete_sync(&defrag_ctrl->defrag_timer);
-#else
-                del_timer_sync(&defrag_ctrl->defrag_timer);
-#endif
-	    }
-            dev_kfree_skb(defrag_ctrl->skb);
-            kfree(defrag_ctrl);
-        }
-    }
+    list_splice_init(&rwnx_hw->defrag_list, &defrag_cleanup);
     spin_unlock_bh(&rwnx_hw->defrag_lock);
+
+    list_for_each_entry_safe(defrag_ctrl, defrag_next, &defrag_cleanup, list) {
+        list_del_init(&defrag_ctrl->list);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
+        timer_delete_sync(&defrag_ctrl->defrag_timer);
+#else
+        del_timer_sync(&defrag_ctrl->defrag_timer);
+#endif
+        dev_kfree_skb(defrag_ctrl->skb);
+        kfree(defrag_ctrl);
+    }
 
 #ifdef CONFIG_DEBUG_FS
     rwnx_dbgfs_unregister(rwnx_hw);

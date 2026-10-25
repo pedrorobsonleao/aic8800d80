@@ -54,16 +54,73 @@ segurança passaram e `make -C drivers/aic8800` compilou novamente os três
 módulos no mesmo kernel. A compilação manteve warnings de fallthrough em
 caminhos existentes e não gerou BTF por falta de `vmlinux`.
 
-Próxima rodada de auditoria recomendada, antes de otimizações:
+## Triagem dos itens ainda abertos (2026-10-25)
 
-1. Completar auditoria de comprimentos de frames RX e dos demais índices diretos em handlers de mensagens do firmware.
-2. Rastrear lifetime do buffer de comando enfileirado no transporte SDIO.
-3. Revisar cancelamento de timers e alocações sob spinlocks, incluindo teardown.
-4. Auditar os demais itens de memória/cópia e só então revisar performance.
+Uma leitura estática inicial dos caminhos abaixo atualiza a prioridade da
+próxima rodada. Isto não substitui a validação dos contratos de transporte nem
+os testes de runtime.
 
-Esses pontos vêm do relatório original e ainda não foram confirmados nesta
-rodada; não devem ser tratados como bugs estabelecidos sem inspeção do caminho
-completo.
+1. **Teardown de fragmentação RX — risco de deadlock confirmado no código; correção pendente.**
+   Em `rwnx_main.c`, a limpeza de `defrag_list` mantém `defrag_lock` enquanto
+   chama `timer_delete_sync()`/`del_timer_sync()` e libera cada entrada. O
+   callback `defrag_timeout_cb()` em `rwnx_rx.c` também adquire `defrag_lock`.
+   Se o callback estiver executando e esperando pelo lock, o teardown espera o
+   callback enquanto mantém esse mesmo lock. Corrigir separando a remoção das
+   entradas sob lock do cancelamento síncrono e da liberação fora do lock, com
+   lifetime protegido contra a corrida entre callback, fragmento final e
+   teardown; acrescentar teste/revisão de concorrência antes de integrar.
+
+2. **Comprimento efetivo das mensagens RX — auditoria incompleta, prioridade alta.**
+   `rwnx_rx_handle_msg()` indexa a tabela de handlers e chama `msgind`; a
+   checagem em `cmd_mgr_msgind()` limita `param_len` ao máximo do protocolo e
+   protege o destino de confirmações, mas não recebe o número de bytes
+   disponíveis no frame recebido. Os parsers USB/SDIO em `aicwf_txrxif.c`
+   copiam `aggr_len + 4` e despacham o cabeçalho como `ipc_e2a_msg`.
+   Rastrear o enquadramento até a origem de `pkt_len`, provar que cabeçalho e
+   payload estão dentro do bloco recebido antes do despacho, e validar cada
+   tamanho mínimo por handler antes de ler `msg->param`. Ainda não há base para
+   classificar um acesso fora dos limites como reproduzido; marcar como
+   **a confirmar**, com correção/ teste pendentes.
+
+3. **Buffer de comando SDIO — origem da mensagem copiada; serialização pendente.**
+   `aicwf_set_cmd_tx()` serializa `a2e_msg` em `bus->cmd_buf` antes de chamar
+   `aicwf_bus_txmsg()`, então o `kfree(cmd->a2e_msg)` posterior não prova, por
+   si só, uso após liberação da mensagem original. Porém,
+   `aicwf_sdio_bus_txmsg()` publica o ponteiro compartilhado em
+   `tx_priv->cmd_buf`, sinaliza o worker e retorna sem esperar a transmissão.
+   Verificar todas as chamadas concorrentes e a leitura/consumo do worker para
+   demonstrar que uma segunda serialização não sobrescreve o buffer antes do
+   envio. Estado: **a confirmar**; não aplicar correção até fechar o contrato
+   de sincronização.
+
+4. **Timers TCP ACK — teardown requer revisão de sincronização.**
+   `tcp_ack_deinit()` desabilita o gerenciador e usa `del_timer()`/`timer_delete()`
+   enquanto mantém o seqlock; essas variantes não aguardam necessariamente um
+   callback já ativo, que pode usar `ack_m->priv` e transmitir. Verificar a
+   ordem de teardown e uso do seqlock no callback antes de trocar por uma
+   variante síncrona; uma espera síncrona sob o lock do callback pode deadlock.
+   Estado: **a confirmar**.
+
+### Atualização: teardown de fragmentação RX
+
+O risco descrito no item 1 foi corrigido na árvore de trabalho. O teardown
+desanexa a lista sob `defrag_lock` e espera/cancela cada timer depois de soltar
+o lock. O callback só libera uma entrada se conseguir removê-la da lista;
+fragmento final e teardown removem a entrada antes de cancelar o timer de forma
+síncrona e liberar seus recursos. A entrada e o timer são inicializados antes
+de publicar a entrada na lista. As alocações feitas dentro da região protegida
+usam `GFP_ATOMIC`.
+
+Validação em 2026-10-25: as 13 verificações de `tests/driver-safety` passaram;
+`make -C drivers/aic8800` compilou os três módulos para
+`7.3.0-9-generic`/x86_64. Permanecem warnings de fallthrough em outros caminhos
+e a geração BTF foi ignorada por falta de `vmlinux`. Não houve teste de
+desconexão/reconexão nem instrumentação lockdep/KASAN; runtime ainda pendente.
+
+Depois desses itens, continuar a auditoria de comprimentos/cópias e demais
+índices de mensagens RX do relatório original. Só então retomar otimizações de
+performance; as medições atuais de throughput não cobrem estabilidade de
+teardown, frames malformados ou transporte SDIO.
 
 ## 1. Registrar e confirmar cada achado
 

@@ -2235,6 +2235,7 @@ void defrag_timeout_cb(struct timer_list *t)
 #endif
 {
 	struct defrag_ctrl_info *defrag_ctrl = NULL;
+	bool detached = false;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0)
 	defrag_ctrl = (struct defrag_ctrl_info *)data;
 #elif LINUX_VERSION_CODE < KERNEL_VERSION(6,16,0)
@@ -2245,10 +2246,20 @@ void defrag_timeout_cb(struct timer_list *t)
 
 	printk("%s:%p\r\n", __func__, defrag_ctrl);
 	spin_lock_bh(&defrag_ctrl->rwnx_hw->defrag_lock);
-	list_del_init(&defrag_ctrl->list);
-	dev_kfree_skb(defrag_ctrl->skb);
-	kfree(defrag_ctrl);
+	if (!list_empty(&defrag_ctrl->list)) {
+		list_del_init(&defrag_ctrl->list);
+		detached = true;
+	}
 	spin_unlock_bh(&defrag_ctrl->rwnx_hw->defrag_lock);
+
+	/* A fragment completion or teardown may have detached this entry and
+	 * taken responsibility for freeing it after synchronously deleting the
+	 * timer. In that case the callback must leave the entry alone.
+	 */
+	if (detached) {
+		dev_kfree_skb(defrag_ctrl->skb);
+		kfree(defrag_ctrl);
+	}
 }
 
 extern void rwnx_data_dump(char* tag, void* data, unsigned long len);
@@ -2644,14 +2655,14 @@ check_len_update:
 						spin_unlock_bh(&rwnx_hw->defrag_lock);
 						return 0;
 					} else {
-						defrag_info = kzalloc(sizeof(struct defrag_ctrl_info), GFP_KERNEL);
+						defrag_info = kzalloc(sizeof(struct defrag_ctrl_info), GFP_ATOMIC);
 						if (defrag_info == NULL) {
 							printk("no defrag_ctrl_info\r\n");
 							dev_kfree_skb(skb);
 							spin_unlock_bh(&rwnx_hw->defrag_lock);
 							return 0;
 						}
-						defrag_info->skb = __dev_alloc_skb(2000, GFP_KERNEL);
+						defrag_info->skb = __dev_alloc_skb(2000, GFP_ATOMIC);
 						if (defrag_info->skb == NULL) {
 							printk("no fragment skb\r\n");
 							dev_kfree_skb(skb);
@@ -2675,8 +2686,6 @@ check_len_update:
 						defrag_info->frm_len = skb->len;
 						defrag_info->rwnx_hw = rwnx_hw;
 						//printk("first:%p,%p,%p,%p,%p, %d,%d\r\n", defrag_info, defrag_info->skb, defrag_info->skb->head, defrag_info->skb->tail, defrag_info->skb->end, defrag_info->frm_len, skb->len);
-						list_add_tail(&defrag_info->list, &rwnx_hw->defrag_list);
-						spin_unlock_bh(&rwnx_hw->defrag_lock);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0)
 						init_timer(&defrag_info->defrag_timer);
 						defrag_info->defrag_timer.data = (unsigned long)defrag_info;
@@ -2684,7 +2693,9 @@ check_len_update:
 #else
 						timer_setup(&defrag_info->defrag_timer, defrag_timeout_cb, 0);
 #endif
+						list_add_tail(&defrag_info->list, &rwnx_hw->defrag_list);
 						ret = mod_timer(&defrag_info->defrag_timer, jiffies + msecs_to_jiffies(DEFRAG_MAX_WAIT));
+						spin_unlock_bh(&rwnx_hw->defrag_lock);
 						dev_kfree_skb(skb);
 						return 0;
 					}
@@ -2728,15 +2739,13 @@ check_len_update:
 
 							skb_tmp = defrag_info->skb;
 							list_del_init(&defrag_info->list);
-							if (timer_pending(&defrag_info->defrag_timer)) {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
-								ret = timer_delete(&defrag_info->defrag_timer);
-#else
-								ret = del_timer(&defrag_info->defrag_timer);
-#endif
-							}
-							kfree(defrag_info);
 							spin_unlock_bh(&rwnx_hw->defrag_lock);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
+							ret = timer_delete_sync(&defrag_info->defrag_timer);
+#else
+							ret = del_timer_sync(&defrag_info->defrag_timer);
+#endif
+							kfree(defrag_info);
 
 							if (!rwnx_rx_data_skb(rwnx_hw, rwnx_vif, skb_tmp, hw_rxhdr))
 								dev_kfree_skb(skb_tmp);

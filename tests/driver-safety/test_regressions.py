@@ -84,6 +84,7 @@ class DriverSafetyRegressions(unittest.TestCase):
     def setUpClass(cls):
         cls.tx = (FDRV / "rwnx_tx.c").read_text(encoding="utf-8")
         cls.rx = (FDRV / "rwnx_rx.c").read_text(encoding="utf-8")
+        cls.main = (FDRV / "rwnx_main.c").read_text(encoding="utf-8")
         cls.usb = (FDRV / "aicwf_usb.c").read_text(encoding="utf-8")
         cls.cmds = (FDRV / "rwnx_cmds.c").read_text(encoding="utf-8")
         cls.cmds_h = (FDRV / "rwnx_cmds.h").read_text(encoding="utf-8")
@@ -256,6 +257,37 @@ class DriverSafetyRegressions(unittest.TestCase):
         cancel = bus_deinit.index("aicwf_usb_cancel_all_urbs(usb)")
         self.assertLess(stop_thread, cancel)
         self.assertLess(kill_tasklet, cancel)
+
+    def test_fragment_timeout_and_teardown_do_not_wait_under_defrag_lock(self):
+        timeout = c_block(self.rx, "void defrag_timeout_cb(ulong data)")
+        self.assertIn("if (!list_empty(&defrag_ctrl->list))", timeout)
+        self.assertLess(timeout.index("spin_unlock_bh"),
+                        timeout.index("dev_kfree_skb"))
+
+        deinit = c_function(self.main, "rwnx_cfg80211_deinit")
+        detach = deinit.index("list_splice_init(&rwnx_hw->defrag_list")
+        unlock = deinit.index("spin_unlock_bh(&rwnx_hw->defrag_lock)", detach)
+        wait_timer = min(pos for pos in (
+            deinit.find("timer_delete_sync(&defrag_ctrl->defrag_timer)", unlock),
+            deinit.find("del_timer_sync(&defrag_ctrl->defrag_timer)", unlock),
+        ) if pos >= 0)
+        self.assertLess(detach, unlock)
+        self.assertLess(unlock, wait_timer)
+        self.assertLess(wait_timer, deinit.index("kfree(defrag_ctrl)", wait_timer))
+
+    def test_fragment_entry_timer_is_initialized_before_publication(self):
+        rxdata = c_function(self.rx, "rwnx_rxdataind_aicwf")
+        publish = rxdata.index("list_add_tail(&defrag_info->list")
+        setup_positions = [
+            pos for pos in (rxdata.find("timer_setup(&defrag_info->defrag_timer"),
+                            rxdata.find("init_timer(&defrag_info->defrag_timer"))
+            if pos >= 0
+        ]
+        self.assertTrue(setup_positions)
+        self.assertLess(max(setup_positions), publish)
+        self.assertLess(publish,
+                        rxdata.index("mod_timer(&defrag_info->defrag_timer"))
+        self.assertIn("kzalloc(sizeof(struct defrag_ctrl_info), GFP_ATOMIC)", rxdata)
 
 
 if __name__ == "__main__":
