@@ -60,27 +60,24 @@ Uma leitura estática inicial dos caminhos abaixo atualiza a prioridade da
 próxima rodada. Isto não substitui a validação dos contratos de transporte nem
 os testes de runtime.
 
-1. **Teardown de fragmentação RX — risco de deadlock confirmado no código; correção pendente.**
+1. **Teardown de fragmentação RX — correção aplicada; validação runtime pendente.**
    Em `rwnx_main.c`, a limpeza de `defrag_list` mantém `defrag_lock` enquanto
    chama `timer_delete_sync()`/`del_timer_sync()` e libera cada entrada. O
    callback `defrag_timeout_cb()` em `rwnx_rx.c` também adquire `defrag_lock`.
    Se o callback estiver executando e esperando pelo lock, o teardown espera o
-   callback enquanto mantém esse mesmo lock. Corrigir separando a remoção das
-   entradas sob lock do cancelamento síncrono e da liberação fora do lock, com
-   lifetime protegido contra a corrida entre callback, fragmento final e
-   teardown; acrescentar teste/revisão de concorrência antes de integrar.
+   callback enquanto mantém esse mesmo lock. A correção desanexa as entradas
+   sob lock, espera os timers fora do lock e coordena o ownership com callback
+   e fragmento final. Falta exercitar desconexão/teardown concorrente em
+   hardware ou com lockdep/KASAN.
 
-2. **Comprimento efetivo das mensagens RX — auditoria incompleta, prioridade alta.**
-   `rwnx_rx_handle_msg()` indexa a tabela de handlers e chama `msgind`; a
-   checagem em `cmd_mgr_msgind()` limita `param_len` ao máximo do protocolo e
-   protege o destino de confirmações, mas não recebe o número de bytes
-   disponíveis no frame recebido. Os parsers USB/SDIO em `aicwf_txrxif.c`
-   copiam `aggr_len + 4` e despacham o cabeçalho como `ipc_e2a_msg`.
-   Rastrear o enquadramento até a origem de `pkt_len`, provar que cabeçalho e
-   payload estão dentro do bloco recebido antes do despacho, e validar cada
-   tamanho mínimo por handler antes de ler `msg->param`. Ainda não há base para
-   classificar um acesso fora dos limites como reproduzido; marcar como
-   **a confirmar**, com correção/ teste pendentes.
+2. **Comprimento e ID das mensagens RX — limites básicos corrigidos; validação funcional pendente.**
+   `aicwf_txrxif.c` valida o cabeçalho mínimo, o tamanho total do frame contra
+   os bytes restantes, o tamanho mínimo de confirmação TX e a consistência do
+   `param_len` de respostas de comando antes do despacho. A busca do handler em
+   `rwnx_msg_rx.c` também confere o índice da task e da mensagem contra o
+   tamanho da tabela. Ainda falta auditar os campos que cada callback lê e
+   exercitar entradas malformadas em hardware/sob sanitizadores; classificar
+   como correção parcial com risco residual.
 
 3. **Buffer de comando SDIO — origem da mensagem copiada; serialização pendente.**
    `aicwf_set_cmd_tx()` serializa `a2e_msg` em `bus->cmd_buf` antes de chamar
@@ -116,6 +113,18 @@ Validação em 2026-10-25: as 13 verificações de `tests/driver-safety` passara
 `7.3.0-9-generic`/x86_64. Permanecem warnings de fallthrough em outros caminhos
 e a geração BTF foi ignorada por falta de `vmlinux`. Não houve teste de
 desconexão/reconexão nem instrumentação lockdep/KASAN; runtime ainda pendente.
+
+### Atualização: limites do transporte RX e dispatch de mensagens
+
+O parser exige o cabeçalho de transporte completo e confere que o tamanho total
+do frame, incluindo alinhamento/overhead, cabe nos bytes disponíveis. Para
+respostas de comando, confere também o cabeçalho `ipc_e2a_msg` e se o payload
+declarado cabe no frame; para confirmação TX, exige os 8 bytes consumidos pelo
+handler. A busca do callback valida ambos os índices antes de acessar a tabela.
+As 15 verificações estruturais passaram e `make -C drivers/aic8800` recompilou
+com sucesso o módulo alterado no kernel `7.3.0-9-generic`. Não foram injetados
+frames malformados em hardware nem usados KASAN/UBSAN; a auditoria dos tamanhos
+mínimos lidos por cada callback continua aberta.
 
 Depois desses itens, continuar a auditoria de comprimentos/cópias e demais
 índices de mensagens RX do relatório original. Só então retomar otimizações de

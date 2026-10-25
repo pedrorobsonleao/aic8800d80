@@ -1767,32 +1767,71 @@ static msg_cb_fct tdls_hdlrs[MSG_I(TDLS_MAX)] = {
     [MSG_I(TDLS_PEER_PS_IND)] = rwnx_rx_tdls_peer_ps_ind,
 };
 
-static msg_cb_fct *msg_hdlrs[] = {
-    [TASK_MM]    = mm_hdlrs,
-    [TASK_DBG]   = dbg_hdlrs,
+static msg_cb_fct rwnx_msg_handler_get(lmac_msg_id_t id)
+{
+	u16 task = MSG_T(id);
+	u16 index = MSG_I(id);
+
+	switch (task) {
 #ifdef CONFIG_RWNX_FULLMAC
-    [TASK_TDLS]  = tdls_hdlrs,
-    [TASK_SCANU] = scan_hdlrs,
-    [TASK_ME]    = me_hdlrs,
-    [TASK_SM]    = sm_hdlrs,
-    [TASK_APM]   = apm_hdlrs,
-    [TASK_MESH]  = mesh_hdlrs,
+	case TASK_MM:
+		if (index < ARRAY_SIZE(mm_hdlrs))
+			return mm_hdlrs[index];
+		break;
+	case TASK_TDLS:
+		if (index < ARRAY_SIZE(tdls_hdlrs))
+			return tdls_hdlrs[index];
+		break;
+	case TASK_SCANU:
+		if (index < ARRAY_SIZE(scan_hdlrs))
+			return scan_hdlrs[index];
+		break;
+	case TASK_ME:
+		if (index < ARRAY_SIZE(me_hdlrs))
+			return me_hdlrs[index];
+		break;
+	case TASK_SM:
+		if (index < ARRAY_SIZE(sm_hdlrs))
+			return sm_hdlrs[index];
+		break;
+	case TASK_APM:
+		if (index < ARRAY_SIZE(apm_hdlrs))
+			return apm_hdlrs[index];
+		break;
+	case TASK_MESH:
+		if (index < ARRAY_SIZE(mesh_hdlrs))
+			return mesh_hdlrs[index];
+		break;
 #endif /* CONFIG_RWNX_FULLMAC */
-};
+	case TASK_DBG:
+		if (index < ARRAY_SIZE(dbg_hdlrs))
+			return dbg_hdlrs[index];
+		break;
+	default:
+		break;
+	}
+
+	return NULL;
+}
 
 /**
  *
  */
 void rwnx_rx_handle_msg(struct rwnx_hw *rwnx_hw, struct ipc_e2a_msg *msg)
 {
+	msg_cb_fct handler;
+
+	if (!rwnx_hw || !msg || !rwnx_hw->cmd_mgr)
+		return;
+
+	handler = rwnx_msg_handler_get(msg->id);
 	//printk("%s(%d) MSG_T(msg->id):%d MSG_I(msg->id):%d cmd:%s\r\n", __func__, 
 	//	msg->id,
 	//	MSG_T(msg->id), 
 	//	MSG_I(msg->id),
 	//	rwnx_id2str[MSG_T(msg->id)][MSG_I(msg->id)]);
 	
-    rwnx_hw->cmd_mgr->msgind(rwnx_hw->cmd_mgr, msg,
-                            msg_hdlrs[MSG_T(msg->id)][MSG_I(msg->id)]);
+    rwnx_hw->cmd_mgr->msgind(rwnx_hw->cmd_mgr, msg, handler);
 }
 
 void rwnx_rx_handle_print(struct rwnx_hw *rwnx_hw, u8 *msg, u32 len)

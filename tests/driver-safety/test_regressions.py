@@ -84,6 +84,7 @@ class DriverSafetyRegressions(unittest.TestCase):
     def setUpClass(cls):
         cls.tx = (FDRV / "rwnx_tx.c").read_text(encoding="utf-8")
         cls.rx = (FDRV / "rwnx_rx.c").read_text(encoding="utf-8")
+        cls.txrxif = (FDRV / "aicwf_txrxif.c").read_text(encoding="utf-8")
         cls.main = (FDRV / "rwnx_main.c").read_text(encoding="utf-8")
         cls.usb = (FDRV / "aicwf_usb.c").read_text(encoding="utf-8")
         cls.cmds = (FDRV / "rwnx_cmds.c").read_text(encoding="utf-8")
@@ -288,6 +289,31 @@ class DriverSafetyRegressions(unittest.TestCase):
         self.assertLess(publish,
                         rxdata.index("mod_timer(&defrag_info->defrag_timer"))
         self.assertIn("kzalloc(sizeof(struct defrag_ctrl_info), GFP_ATOMIC)", rxdata)
+
+    def test_rx_transport_length_validation_precedes_frame_access(self):
+        validate = c_function(self.txrxif, "aicwf_rx_pkt_len_valid")
+        self.assertIn("available < 4", validate)
+        self.assertIn("frame_len <= available", validate)
+        self.assertIn("pkt_len - offsetof(struct ipc_e2a_msg, param) < param_len",
+                      validate)
+        self.assertIn("type == USB_TYPE_CFG_DATA_CFM && pkt_len < sizeof(u32) * 2",
+                      validate)
+
+        aggregate = c_function(self.txrxif, "aicwf_another_ptk")
+        self.assertIn("aicwf_rx_pkt_len_valid(skb->data, skb->len)", aggregate)
+        frames = c_function(self.txrxif, "aicwf_process_rxframes")
+        self.assertGreaterEqual(frames.count("if (!aicwf_rx_pkt_len_valid"), 2)
+
+    def test_firmware_message_id_is_bounded_before_handler_lookup(self):
+        lookup = c_function(self.msg_rx, "rwnx_msg_handler_get")
+        bounded = re.findall(
+            r"if \(index < ARRAY_SIZE\((\w+)\)\)\s*return \1\[index\];",
+            lookup,
+        )
+        self.assertEqual(len(bounded), 8)
+        handler = c_function(self.msg_rx, "rwnx_rx_handle_msg")
+        self.assertIn("handler = rwnx_msg_handler_get(msg->id)", handler)
+        self.assertNotIn("msg_hdlrs[MSG_T(msg->id)]", handler)
 
 
 if __name__ == "__main__":
