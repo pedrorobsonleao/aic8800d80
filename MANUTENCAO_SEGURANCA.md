@@ -47,7 +47,7 @@ propagar esse tamanho desde cada chamador até o comando antes de limitar a cóp
 
 Próxima rodada de auditoria recomendada, antes de otimizações:
 
-1. Confirmar bounds checks de STA/VIF e comprimento de frames no RX.
+1. Completar a auditoria de comprimento de frames RX e índices restantes em handlers de mensagens do firmware.
 2. Rastrear submissão, cancelamento e liberação de URBs durante disconnect USB.
 3. Rastrear lifetime do buffer de comando enfileirado no transporte SDIO.
 4. Revisar cancelamento de timers e alocações sob spinlocks, incluindo teardown.

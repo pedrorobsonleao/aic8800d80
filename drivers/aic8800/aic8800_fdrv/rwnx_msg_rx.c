@@ -557,24 +557,25 @@ static inline int rwnx_rx_ps_change_ind(struct rwnx_hw *rwnx_hw,
                                         struct ipc_e2a_msg *msg)
 {
     struct mm_ps_change_ind *ind = (struct mm_ps_change_ind *)msg->param;
-    struct rwnx_sta *sta = &rwnx_hw->sta_table[ind->sta_idx];
+    struct rwnx_sta *sta;
+    struct rwnx_vif *vif;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-#if 1//2022-01-15 add for rwnx_hw->vif_table[sta->vif_idx] if null when rwnx_close
-	if (!rwnx_hw->vif_table[sta->vif_idx]){
-        wiphy_err(rwnx_hw->wiphy, "rwnx_hw->vif_table[sta->vif_idx] is null\n");	
-		return 0;
-	}
-#endif
-
-    if (ind->sta_idx >= (NX_REMOTE_STA_MAX + NX_VIRT_DEV_MAX)) {
+    if (ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table)) {
         wiphy_err(rwnx_hw->wiphy, "Invalid sta index reported by fw %d\n",
                   ind->sta_idx);
         return 1;
     }
+    sta = &rwnx_hw->sta_table[ind->sta_idx];
+    if (sta->vif_idx >= NX_VIRT_DEV_MAX ||
+        !(vif = rwnx_hw->vif_table[sta->vif_idx])) {
+        wiphy_err(rwnx_hw->wiphy, "Invalid vif index for sta %d\n",
+                  ind->sta_idx);
+        return 1;
+    }
 
-    netdev_dbg(rwnx_hw->vif_table[sta->vif_idx]->ndev,
+    netdev_dbg(vif->ndev,
                "Sta %d, change PS mode to %s", sta->sta_idx,
                ind->ps_state ? "ON" : "OFF");
 
@@ -583,7 +584,7 @@ static inline int rwnx_rx_ps_change_ind(struct rwnx_hw *rwnx_hw,
     } else if (rwnx_hw->adding_sta) {
         sta->ps.active = ind->ps_state ? true : false;
     } else {
-        netdev_err(rwnx_hw->vif_table[sta->vif_idx]->ndev,
+        netdev_err(vif->ndev,
                    "Ignore PS mode change on invalid sta\n");
     }
 	
@@ -597,11 +598,19 @@ static inline int rwnx_rx_traffic_req_ind(struct rwnx_hw *rwnx_hw,
                                           struct ipc_e2a_msg *msg)
 {
     struct mm_traffic_req_ind *ind = (struct mm_traffic_req_ind *)msg->param;
-    struct rwnx_sta *sta = &rwnx_hw->sta_table[ind->sta_idx];
+    struct rwnx_sta *sta;
+    struct rwnx_vif *vif;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    netdev_dbg(rwnx_hw->vif_table[sta->vif_idx]->ndev,
+    if (ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+        return 1;
+    sta = &rwnx_hw->sta_table[ind->sta_idx];
+    if (sta->vif_idx >= NX_VIRT_DEV_MAX ||
+        !(vif = rwnx_hw->vif_table[sta->vif_idx]))
+        return 1;
+
+    netdev_dbg(vif->ndev,
                "Sta %d, asked for %d pkt", sta->sta_idx, ind->pkt_cnt);
 
     rwnx_ps_bh_traffic_req(rwnx_hw, sta, ind->pkt_cnt,
@@ -867,6 +876,9 @@ static inline int rwnx_rx_me_tx_credits_update_ind(struct rwnx_hw *rwnx_hw,
     struct me_tx_credits_update_ind *ind = (struct me_tx_credits_update_ind *)msg->param;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+        return 1;
 
     rwnx_txq_credit_update(rwnx_hw, ind->sta_idx, ind->tid, ind->credits);
 

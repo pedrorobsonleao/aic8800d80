@@ -125,18 +125,28 @@ struct rwnx_vif *rwnx_rx_get_vif(struct rwnx_hw *rwnx_hw, int vif_idx)
 {
     struct rwnx_vif *rwnx_vif = NULL;
 
-    if (vif_idx < NX_VIRT_DEV_MAX) {
-        rwnx_vif = rwnx_hw->vif_table[vif_idx];
-        if(!rwnx_vif){
-            AICWFDBG(LOGERROR, "%s rwnx_hw->vif_table[%d] NULL\r\n", __func__, vif_idx);
-            return NULL;
-        }else if(!rwnx_vif->up){
-            AICWFDBG(LOGERROR, "%s rwnx_hw->vif_table[%d] is down\r\n", __func__, vif_idx);
-            return NULL;
-        }
+    if (vif_idx < 0 || vif_idx >= NX_VIRT_DEV_MAX)
+        return NULL;
+
+    rwnx_vif = rwnx_hw->vif_table[vif_idx];
+    if (!rwnx_vif) {
+        AICWFDBG(LOGERROR, "%s rwnx_hw->vif_table[%d] NULL\r\n", __func__, vif_idx);
+        return NULL;
+    } else if (!rwnx_vif->up) {
+        AICWFDBG(LOGERROR, "%s rwnx_hw->vif_table[%d] is down\r\n", __func__, vif_idx);
+        return NULL;
     }
 
     return rwnx_vif;
+}
+
+static inline struct rwnx_sta *rwnx_rx_get_sta(struct rwnx_hw *rwnx_hw,
+                                                int sta_idx)
+{
+    if (sta_idx < 0 || sta_idx >= (int)ARRAY_SIZE(rwnx_hw->sta_table))
+        return NULL;
+
+    return &rwnx_hw->sta_table[sta_idx];
 }
 
 /**
@@ -519,8 +529,8 @@ static bool rwnx_rx_data_skb(struct rwnx_hw *rwnx_hw, struct rwnx_vif *rwnx_vif,
                layer simply resend on wireless interface */
             if (flags_dst_idx != RWNX_INVALID_STA)
             {
-                struct rwnx_sta *sta = &rwnx_hw->sta_table[flags_dst_idx];
-                if (sta->valid && (sta->vlan_idx == rwnx_vif->vif_index))
+                struct rwnx_sta *sta = rwnx_rx_get_sta(rwnx_hw, flags_dst_idx);
+                if (sta && sta->valid && (sta->vlan_idx == rwnx_vif->vif_index))
                 {
                     forward = false;
                     resend = true;
@@ -2762,11 +2772,15 @@ check_len_update:
             if (hw_rxhdr->flags_sta_idx != RWNX_INVALID_STA) {
                 struct rwnx_sta *sta;
 
-                sta = &rwnx_hw->sta_table[hw_rxhdr->flags_sta_idx];
+                sta = rwnx_rx_get_sta(rwnx_hw, hw_rxhdr->flags_sta_idx);
+                if (!sta) {
+                    dev_kfree_skb(skb);
+                    goto end;
+                }
                 rwnx_rx_statistic(rwnx_hw, hw_rxhdr, sta);
 
                 if (sta->vlan_idx != rwnx_vif->vif_index) {
-                    rwnx_vif = rwnx_hw->vif_table[sta->vlan_idx];
+                    rwnx_vif = rwnx_rx_get_vif(rwnx_hw, sta->vlan_idx);
                     if (!rwnx_vif) {
                         dev_kfree_skb(skb);
                         goto end;
@@ -2820,11 +2834,18 @@ check_len_update:
 				struct sk_buff *rx_skb;
 
 #ifdef CONFIG_DYNAMIC_PERPWR
-				sta = &rwnx_hw->sta_table[hw_rxhdr->flags_sta_idx];
-				rssi_update_txpwrloss(sta, hw_rxhdr->hwvect.rx_vect1.rssi1, rwnx_vif);
+				if (hw_rxhdr->flags_sta_idx != RWNX_INVALID_STA) {
+					sta = rwnx_rx_get_sta(rwnx_hw, hw_rxhdr->flags_sta_idx);
+					if (sta)
+						rssi_update_txpwrloss(sta, hw_rxhdr->hwvect.rx_vect1.rssi1, rwnx_vif);
+				}
 #endif
 #ifdef CONFIG_BAND_STEERING
-				(&rwnx_hw->sta_table[hw_rxhdr->flags_sta_idx])->rssi = hw_rxhdr->hwvect.rx_vect1.rssi1;
+				if (hw_rxhdr->flags_sta_idx != RWNX_INVALID_STA) {
+					struct rwnx_sta *sta = rwnx_rx_get_sta(rwnx_hw, hw_rxhdr->flags_sta_idx);
+					if (sta)
+						sta->rssi = hw_rxhdr->hwvect.rx_vect1.rssi1;
+				}
 #endif
 				u8 flags_dst_idx = hw_rxhdr->flags_dst_idx;
 				u8 flags_need_reord = hw_rxhdr->flags_need_reord;
@@ -2860,8 +2881,8 @@ check_len_update:
 						/* unicast pkt for STA inside the BSS, no need to forward to upper
 						   layer simply resend on wireless interface */
 						if ((flags_dst_idx != RWNX_INVALID_STA) && !flags_is_amsdu) {
-							struct rwnx_sta *sta = &rwnx_hw->sta_table[flags_dst_idx];
-							if (sta->valid && (sta->vlan_idx == rwnx_vif->vif_index)) {
+							struct rwnx_sta *sta = rwnx_rx_get_sta(rwnx_hw, flags_dst_idx);
+							if (sta && sta->valid && (sta->vlan_idx == rwnx_vif->vif_index)) {
 								resend = true;
 								forward = false;
 							}

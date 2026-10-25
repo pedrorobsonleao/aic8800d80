@@ -2506,8 +2506,12 @@ int rwnx_txdatacfm(void *pthis, void *host_id)
 void rwnx_txq_credit_update(struct rwnx_hw *rwnx_hw, int sta_idx, u8 tid,
                             s8 update)
 {
-    struct rwnx_sta *sta = &rwnx_hw->sta_table[sta_idx];
+    struct rwnx_sta *sta;
     struct rwnx_txq *txq;
+
+    if (sta_idx < 0 || sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+        return;
+    sta = &rwnx_hw->sta_table[sta_idx];
 
     txq = rwnx_txq_sta_get(sta, tid, rwnx_hw);
 

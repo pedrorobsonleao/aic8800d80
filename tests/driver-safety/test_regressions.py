@@ -88,6 +88,7 @@ class DriverSafetyRegressions(unittest.TestCase):
         cls.cmds = (FDRV / "rwnx_cmds.c").read_text(encoding="utf-8")
         cls.cmds_h = (FDRV / "rwnx_cmds.h").read_text(encoding="utf-8")
         cls.msg_tx = (FDRV / "rwnx_msg_tx.c").read_text(encoding="utf-8")
+        cls.msg_rx = (FDRV / "rwnx_msg_rx.c").read_text(encoding="utf-8")
         cls.tcp_ack = (FDRV / "aicwf_tcp_ack.c").read_text(encoding="utf-8")
 
     def test_consumed_tx_skb_is_not_returned_as_busy(self):
@@ -180,6 +181,26 @@ class DriverSafetyRegressions(unittest.TestCase):
         result = queue.index("ret = cmd->result")
         free = queue.index("rwnx_cmd_free(cmd)", result)
         self.assertLess(result, free)
+
+    def test_rx_station_and_vif_indices_are_checked_before_lookup(self):
+        vif_lookup = c_function(self.rx, "rwnx_rx_get_vif")
+        self.assertIn("vif_idx < 0 || vif_idx >= NX_VIRT_DEV_MAX", vif_lookup)
+        sta_lookup = c_function(self.rx, "rwnx_rx_get_sta")
+        self.assertIn("sta_idx < 0", sta_lookup)
+        self.assertIn("sta_idx >= (int)ARRAY_SIZE(rwnx_hw->sta_table)", sta_lookup)
+
+        for name in ("rwnx_rx_ps_change_ind", "rwnx_rx_traffic_req_ind"):
+            function = c_function(self.msg_rx, name)
+            guard = function.index("ind->sta_idx >= ARRAY_SIZE")
+            lookup = function.index("&rwnx_hw->sta_table[ind->sta_idx]")
+            vif_guard = function.index("sta->vif_idx >= NX_VIRT_DEV_MAX")
+            vif_lookup = function.index("rwnx_hw->vif_table[sta->vif_idx]", vif_guard)
+            self.assertLess(guard, lookup)
+            self.assertLess(lookup, vif_guard)
+            self.assertLess(vif_guard, vif_lookup)
+
+        credit = c_function(self.tx, "rwnx_txq_credit_update")
+        self.assertLess(credit.index("sta_idx < 0"), credit.index("sta_table[sta_idx]"))
 
 
 if __name__ == "__main__":
