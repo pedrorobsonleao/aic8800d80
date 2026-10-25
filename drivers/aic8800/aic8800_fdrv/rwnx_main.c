@@ -9646,11 +9646,11 @@ void rwnx_cfg80211_deinit(struct rwnx_hw *rwnx_hw)
     	wiphy_unregister(rwnx_hw->wiphy);
 	}
     rwnx_radar_detection_deinit(&rwnx_hw->radar);
-    rwnx_platform_off(rwnx_hw, NULL);
-    kmem_cache_destroy(rwnx_hw->sw_txhdr_cache);
 #ifdef CONFIG_FILTER_TCP_ACK
     tcp_ack_deinit(rwnx_hw);
 #endif
+    rwnx_platform_off(rwnx_hw, NULL);
+    kmem_cache_destroy(rwnx_hw->sw_txhdr_cache);
     aicwf_wakeup_lock_deinit(rwnx_hw);
 
 	if(rwnx_hw->wiphy){

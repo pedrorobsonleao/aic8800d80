@@ -141,6 +141,20 @@ class DriverSafetyRegressions(unittest.TestCase):
         dereference = tx.index("msgbuf->rwnx_vif", allocation)
         self.assertLess(null_check, dereference)
 
+    def test_tcp_ack_timers_are_drained_before_locks_and_platform_teardown(self):
+        deinit = c_function(self.tcp_ack, "tcp_ack_deinit")
+        timer_wait = deinit.index("timer_delete_sync")
+        lock = deinit.index("write_seqlock_bh", timer_wait)
+        self.assertLess(timer_wait, lock)
+        self.assertIn("del_timer_sync", deinit)
+
+        teardown = c_function(self.main, "rwnx_cfg80211_deinit")
+        ack_deinit = teardown.index("tcp_ack_deinit(rwnx_hw)")
+        platform_off = teardown.index("rwnx_platform_off(rwnx_hw")
+        cache_destroy = teardown.index("kmem_cache_destroy", platform_off)
+        self.assertLess(ack_deinit, platform_off)
+        self.assertLess(ack_deinit, cache_destroy)
+
     def test_reorder_tid_is_bounded_and_invalid_tid_skips_reordering(self):
         flush = c_function(self.rx, "reord_flush_tid")
         flush_guard = flush.index("tid >= ARRAY_SIZE")

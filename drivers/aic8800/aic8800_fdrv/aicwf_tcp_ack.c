@@ -107,12 +107,13 @@ void tcp_ack_deinit(struct rwnx_hw *priv)
 	for (i = 0; i < TCP_ACK_NUM; i++) {
 		drop_msg = NULL;
 
-		write_seqlock_bh(&ack_m->ack_info[i].seqlock);
+		/* The callback takes this seqlock, so wait for it before locking. */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
-	    timer_delete(&ack_m->ack_info[i].timer);
+		timer_delete_sync(&ack_m->ack_info[i].timer);
 #else
-		del_timer(&ack_m->ack_info[i].timer);
+		del_timer_sync(&ack_m->ack_info[i].timer);
 #endif
+		write_seqlock_bh(&ack_m->ack_info[i].seqlock);
 		drop_msg = ack_m->ack_info[i].msgbuf;
 		ack_m->ack_info[i].msgbuf = NULL;
 		write_sequnlock_bh(&ack_m->ack_info[i].seqlock);

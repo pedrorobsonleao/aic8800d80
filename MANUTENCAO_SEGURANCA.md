@@ -97,13 +97,15 @@ os testes de runtime.
    O hardware SDIO não está disponível; concorrência e teardown ainda precisam
    de validação funcional em dispositivo.
 
-4. **Timers TCP ACK — teardown requer revisão de sincronização.**
-   `tcp_ack_deinit()` desabilita o gerenciador e usa `del_timer()`/`timer_delete()`
-   enquanto mantém o seqlock; essas variantes não aguardam necessariamente um
-   callback já ativo, que pode usar `ack_m->priv` e transmitir. Verificar a
-   ordem de teardown e uso do seqlock no callback antes de trocar por uma
-   variante síncrona; uma espera síncrona sob o lock do callback pode deadlock.
-   Estado: **a confirmar**.
+4. **Timers TCP ACK — correção de teardown aplicada; validação runtime pendente.**
+   `tcp_ack_deinit()` desabilita o gerenciador e agora aguarda cada callback
+   (`del_timer_sync()`/`timer_delete_sync()`) antes de adquirir o seqlock e
+   liberar a mensagem em espera. A espera fica fora do seqlock, que também é
+   usado pelo callback, evitando deadlock. O teardown chama a rotina antes de
+   `rwnx_platform_off()` e da destruição do cache TX, para que callback ativo
+   termine o envio antes da infraestrutura ser desmontada. A compilação dos
+   objetos `rwnx_main.o` e `aicwf_tcp_ack.o` e a regressão estrutural passaram;
+   falta validar desconexão concorrente em hardware e com lockdep/KASAN.
 
 ### Atualização: teardown de fragmentação RX
 
