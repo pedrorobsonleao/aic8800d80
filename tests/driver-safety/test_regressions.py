@@ -166,6 +166,8 @@ class DriverSafetyRegressions(unittest.TestCase):
         self.assertLess(assertion.index("msg->param_len < offsetof"), guard)
         self.assertLess(guard, copy)
         self.assertIn("ind->len > msg->param_len - offsetof", assertion)
+        header_guard = c_block(assertion, "if (msg->param_len < offsetof(struct fw_assert_info_ind")
+        self.assertNotIn("ind->len", header_guard)
 
     def test_unknown_firmware_survey_frequency_does_not_trigger_bug(self):
         mapper = c_function(self.msg_rx, "rwnx_freq_to_idx")
@@ -183,6 +185,8 @@ class DriverSafetyRegressions(unittest.TestCase):
         self.assertIn("ind->length < offsetof(struct ieee80211_mgmt", scan)
         self.assertIn("if (!scan_re_wext->ind || !scan_re_wext->payload)", scan)
         self.assertIn("vfree(scan_re_wext->payload)", scan)
+        header_guard = c_block(scan, "if (msg->param_len < offsetof(struct scanu_result_ind")
+        self.assertNotIn("ind->length", header_guard)
 
     def test_firmware_log_rejects_empty_input_and_caps_ring_copy(self):
         function = c_function(self.msg_rx, "rwnx_rx_handle_print")

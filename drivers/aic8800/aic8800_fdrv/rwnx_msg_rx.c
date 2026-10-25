@@ -818,8 +818,13 @@ static inline int rwnx_rx_scanu_result_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (msg->param_len < offsetof(struct scanu_result_ind, payload) ||
-        ind->length < offsetof(struct ieee80211_mgmt,
+    if (msg->param_len < offsetof(struct scanu_result_ind, payload)) {
+        pr_warn("%s: truncated scan result header (%u bytes)\n",
+                __func__, msg->param_len);
+        return -EMSGSIZE;
+    }
+
+    if (ind->length < offsetof(struct ieee80211_mgmt,
                                u.probe_resp.variable) ||
         ind->length > msg->param_len -
                       offsetof(struct scanu_result_ind, payload)) {
@@ -1835,8 +1840,13 @@ static inline int rwnx_fw_assert_ind(struct rwnx_hw *rwnx_hw,
     struct fw_assert_info_ind *ind = (struct fw_assert_info_ind *)msg->param;
     uint8_t buffer[256];
 
-    if (msg->param_len < offsetof(struct fw_assert_info_ind, info) ||
-        ind->len >= sizeof(buffer) ||
+    if (msg->param_len < offsetof(struct fw_assert_info_ind, info)) {
+        pr_err("%s: truncated assert message (%u bytes)\n",
+               __func__, msg->param_len);
+        return -EMSGSIZE;
+    }
+
+    if (ind->len >= sizeof(buffer) ||
         ind->len > msg->param_len - offsetof(struct fw_assert_info_ind, info)) {
         pr_err("%s: invalid assert message length (%u, payload %u)\n",
                __func__, ind->len, msg->param_len);
