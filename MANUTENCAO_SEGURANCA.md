@@ -97,7 +97,10 @@ os testes de runtime.
    externa agora verificam o tamanho fixo; conexão também limita a soma dos IE
    ao buffer, valida contexto/largura/frequência de canal, e desconexão ignora
    uma indicação de estação em VIF AP sem executar `BUG()`. Os 23 testes
-   estruturais passaram e `rwnx_msg_rx.o` compilou novamente.
+   estruturais passaram e `rwnx_msg_rx.o` compilou novamente. Em seguida,
+   foram adicionadas verificações de tamanho e índices para notificações de
+   troca de canal, TDLS, CSA, survey, RSSI/perda, MIC failure, créditos TX e
+   atualizações mesh. Os 25 testes estruturais passaram e o objeto recompilou.
 
 3. **Buffer de comando SDIO — corrigido; validação em hardware pendente.**
    `aicwf_set_cmd_tx()` serializa cada mensagem no único `bus->cmd_buf` antes de

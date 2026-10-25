@@ -67,7 +67,12 @@ static inline int rwnx_rx_chan_pre_switch_ind(struct rwnx_hw *rwnx_hw,
                                               struct ipc_e2a_msg *msg)
 {
     struct rwnx_vif *rwnx_vif;
-    int chan_idx = ((struct mm_channel_pre_switch_ind *)msg->param)->chan_index;
+    struct mm_channel_pre_switch_ind *ind = (void *)msg->param;
+    int chan_idx;
+
+    if (msg->param_len < sizeof(*ind))
+        return -EMSGSIZE;
+    chan_idx = ind->chan_index;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -92,9 +97,16 @@ static inline int rwnx_rx_chan_switch_ind(struct rwnx_hw *rwnx_hw,
                                           struct ipc_e2a_msg *msg)
 {
     struct rwnx_vif *rwnx_vif;
-    int chan_idx = ((struct mm_channel_switch_ind *)msg->param)->chan_index;
-    bool roc     = ((struct mm_channel_switch_ind *)msg->param)->roc;
-    bool roc_tdls = ((struct mm_channel_switch_ind *)msg->param)->roc_tdls;
+    struct mm_channel_switch_ind *ind = (void *)msg->param;
+    int chan_idx;
+    bool roc, roc_tdls;
+
+    if (msg->param_len < sizeof(*ind) ||
+        ind->chan_index >= NX_CHAN_CTXT_CNT)
+        return -EMSGSIZE;
+    chan_idx = ind->chan_index;
+    roc = ind->roc;
+    roc_tdls = ind->roc_tdls;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -102,7 +114,9 @@ static inline int rwnx_rx_chan_switch_ind(struct rwnx_hw *rwnx_hw,
 
 #ifdef CONFIG_RWNX_FULLMAC
     if (roc_tdls) {
-        u8 vif_index = ((struct mm_channel_switch_ind *)msg->param)->vif_index;
+        u8 vif_index = ind->vif_index;
+        if (vif_index >= NX_VIRT_DEV_MAX)
+            return -EINVAL;
         list_for_each_entry(rwnx_vif, &rwnx_hw->vifs, list) {
             if (rwnx_vif->vif_index == vif_index) {
                 rwnx_vif->roc_tdls = true;
@@ -180,7 +194,12 @@ static inline int rwnx_rx_tdls_chan_switch_base_ind(struct rwnx_hw *rwnx_hw,
                                                     struct ipc_e2a_msg *msg)
 {
     struct rwnx_vif *rwnx_vif;
-    u8 vif_index = ((struct tdls_chan_switch_base_ind *)msg->param)->vif_index;
+    struct tdls_chan_switch_base_ind *ind = (void *)msg->param;
+    u8 vif_index;
+
+    if (msg->param_len < sizeof(*ind) || ind->vif_index >= NX_VIRT_DEV_MAX)
+        return -EMSGSIZE;
+    vif_index = ind->vif_index;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -200,12 +219,21 @@ static inline int rwnx_rx_tdls_peer_ps_ind(struct rwnx_hw *rwnx_hw,
                                            struct ipc_e2a_msg *msg)
 {
     struct rwnx_vif *rwnx_vif;
-    u8 vif_index = ((struct tdls_peer_ps_ind *)msg->param)->vif_index;
-    bool ps_on = ((struct tdls_peer_ps_ind *)msg->param)->ps_on;
+    struct tdls_peer_ps_ind *ind = (void *)msg->param;
+    u8 vif_index;
+    bool ps_on;
+
+    if (msg->param_len < sizeof(*ind) || ind->vif_index >= NX_VIRT_DEV_MAX)
+        return -EMSGSIZE;
+    vif_index = ind->vif_index;
+    ps_on = ind->ps_on;
 
 #ifdef CONFIG_RWNX_FULLMAC
     list_for_each_entry(rwnx_vif, &rwnx_hw->vifs, list) {
         if (rwnx_vif->vif_index == vif_index) {
+            if (ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table) ||
+                !rwnx_vif->sta.tdls_sta)
+                return -EINVAL;
             rwnx_vif->sta.tdls_sta->tdls.ps_on = ps_on;
             // Update PS status for the TDLS station
             rwnx_ps_bh_enable(rwnx_hw, rwnx_vif->sta.tdls_sta, ps_on);
@@ -279,9 +307,14 @@ static inline int rwnx_rx_p2p_vif_ps_change_ind(struct rwnx_hw *rwnx_hw,
                                                 struct rwnx_cmd *cmd,
                                                 struct ipc_e2a_msg *msg)
 {
-    int vif_idx  = ((struct mm_p2p_vif_ps_change_ind *)msg->param)->vif_index;
-    int ps_state = ((struct mm_p2p_vif_ps_change_ind *)msg->param)->ps_state;
+    struct mm_p2p_vif_ps_change_ind *ind = (void *)msg->param;
+    int vif_idx, ps_state;
     struct rwnx_vif *vif_entry;
+
+    if (msg->param_len < sizeof(*ind) || ind->vif_index >= NX_VIRT_DEV_MAX)
+        return -EMSGSIZE;
+    vif_idx = ind->vif_index;
+    ps_state = ind->ps_state;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -321,6 +354,9 @@ static inline int rwnx_rx_channel_survey_ind(struct rwnx_hw *rwnx_hw,
                                              struct ipc_e2a_msg *msg)
 {
     struct mm_channel_survey_ind *ind = (struct mm_channel_survey_ind *)msg->param;
+
+    if (msg->param_len < sizeof(*ind))
+        return -EMSGSIZE;
     // Get the channel index
     int idx = rwnx_freq_to_idx(rwnx_hw, ind->freq);
     // Get the survey
@@ -359,10 +395,14 @@ static inline int rwnx_rx_rssi_status_ind(struct rwnx_hw *rwnx_hw,
                                           struct ipc_e2a_msg *msg)
 {
     struct mm_rssi_status_ind *ind = (struct mm_rssi_status_ind *)msg->param;
-    int vif_idx  = ind->vif_index;
-    bool rssi_status = ind->rssi_status;
-
+    int vif_idx;
+    bool rssi_status;
     struct rwnx_vif *vif_entry;
+
+    if (msg->param_len < sizeof(*ind))
+        return -EMSGSIZE;
+    vif_idx = ind->vif_index;
+    rssi_status = ind->rssi_status;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -388,7 +428,11 @@ static inline int rwnx_rx_pktloss_notify_ind(struct rwnx_hw *rwnx_hw,
 #ifdef CONFIG_RWNX_FULLMAC
     struct mm_pktloss_ind *ind = (struct mm_pktloss_ind *)msg->param;
     struct rwnx_vif *vif_entry;
-    int vif_idx  = ind->vif_index;
+    int vif_idx;
+
+    if (msg->param_len < sizeof(*ind))
+        return -EMSGSIZE;
+    vif_idx = ind->vif_index;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
@@ -454,6 +498,10 @@ static inline int rwnx_apm_staloss_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
+    if (msg->param_len < sizeof(*ind) || ind->vif_idx >= NX_VIRT_DEV_MAX ||
+        ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+        return -EMSGSIZE;
+
     memcpy(rwnx_hw->sta_mac_addr, ind->mac_addr, 6);
     rwnx_hw->apm_vif_idx = ind->vif_idx;
 
@@ -472,6 +520,9 @@ static inline int rwnx_rx_csa_counter_ind(struct rwnx_hw *rwnx_hw,
     bool found = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (msg->param_len < sizeof(*ind) || ind->vif_index >= NX_VIRT_DEV_MAX)
+        return -EMSGSIZE;
 
     // Look for VIF entry
     list_for_each_entry(vif, &rwnx_hw->vifs, list) {
@@ -504,6 +555,10 @@ static inline int rwnx_rx_csa_finish_ind(struct rwnx_hw *rwnx_hw,
     bool found = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (msg->param_len < sizeof(*ind) || ind->vif_index >= NX_VIRT_DEV_MAX ||
+        ind->chan_idx >= NX_CHAN_CTXT_CNT)
+        return -EMSGSIZE;
 
     // Look for VIF entry
     list_for_each_entry(vif, &rwnx_hw->vifs, list) {
@@ -547,6 +602,9 @@ static inline int rwnx_rx_csa_traffic_ind(struct rwnx_hw *rwnx_hw,
     bool found = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (msg->param_len < sizeof(*ind) || ind->vif_index >= NX_VIRT_DEV_MAX)
+        return -EMSGSIZE;
 
     // Look for VIF entry
     list_for_each_entry(vif, &rwnx_hw->vifs, list) {
@@ -887,10 +945,17 @@ static inline int rwnx_rx_me_tkip_mic_failure_ind(struct rwnx_hw *rwnx_hw,
                                                   struct ipc_e2a_msg *msg)
 {
     struct me_tkip_mic_failure_ind *ind = (struct me_tkip_mic_failure_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
-    struct net_device *dev = rwnx_vif->ndev;
+    struct rwnx_vif *rwnx_vif;
+    struct net_device *dev;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (msg->param_len < sizeof(*ind) || ind->vif_idx >= NX_VIRT_DEV_MAX)
+        return -EMSGSIZE;
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    if (!rwnx_vif)
+        return -EINVAL;
+    dev = rwnx_vif->ndev;
 
     cfg80211_michael_mic_failure(dev, (u8 *)&ind->addr, (ind->ga?NL80211_KEYTYPE_GROUP:
                                  NL80211_KEYTYPE_PAIRWISE), ind->keyid,
@@ -907,7 +972,9 @@ static inline int rwnx_rx_me_tx_credits_update_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+    if (msg->param_len < sizeof(*ind) ||
+        ind->sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table) ||
+        ind->tid >= TID_MAX)
         return 1;
 
     rwnx_txq_credit_update(rwnx_hw, ind->sta_idx, ind->tid, ind->credits);
@@ -1440,6 +1507,9 @@ static inline int rwnx_rx_mesh_path_create_cfm(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
+    if (msg->param_len < sizeof(*cfm))
+        return -EMSGSIZE;
+
     if (cfm->vif_idx >= NX_VIRT_DEV_MAX)
         return 1;
     rwnx_vif = rwnx_hw->vif_table[cfm->vif_idx];
@@ -1461,6 +1531,9 @@ static inline int rwnx_rx_mesh_peer_update_ind(struct rwnx_hw *rwnx_hw,
     struct rwnx_sta *rwnx_sta;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (msg->param_len < sizeof(*ind))
+        return -EMSGSIZE;
 
     if (ind->vif_idx >= NX_VIRT_DEV_MAX ||
         ind->sta_idx >= NX_REMOTE_STA_MAX)
@@ -1566,6 +1639,9 @@ static inline int rwnx_rx_mesh_path_update_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
+    if (msg->param_len < sizeof(*ind))
+        return -EMSGSIZE;
+
     if (ind->vif_idx >= NX_VIRT_DEV_MAX)
         return 1;
     rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
@@ -1635,6 +1711,9 @@ static inline int rwnx_rx_mesh_proxy_update_ind(struct rwnx_hw *rwnx_hw,
     bool found = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (msg->param_len < sizeof(*ind))
+        return -EMSGSIZE;
 
     if (ind->vif_idx >= NX_VIRT_DEV_MAX)
         return 1;

@@ -225,6 +225,42 @@ class DriverSafetyRegressions(unittest.TestCase):
                         auth.index("ind->vif_idx >= NX_VIRT_DEV_MAX"))
         self.assertIn("ind->ssid.length > MAC_SSID_LEN", auth)
 
+    def test_remaining_mm_me_and_tdls_callbacks_check_payloads_and_indices(self):
+        checks = {
+            "rwnx_rx_chan_pre_switch_ind": "sizeof(*ind)",
+            "rwnx_rx_chan_switch_ind": "chan_index >= NX_CHAN_CTXT_CNT",
+            "rwnx_rx_tdls_chan_switch_base_ind": "vif_index >= NX_VIRT_DEV_MAX",
+            "rwnx_rx_tdls_peer_ps_ind": "!rwnx_vif->sta.tdls_sta",
+            "rwnx_rx_p2p_vif_ps_change_ind": "vif_index >= NX_VIRT_DEV_MAX",
+            "rwnx_rx_channel_survey_ind": "msg->param_len < sizeof(*ind)",
+            "rwnx_rx_rssi_status_ind": "msg->param_len < sizeof(*ind)",
+            "rwnx_rx_pktloss_notify_ind": "msg->param_len < sizeof(*ind)",
+            "rwnx_apm_staloss_ind": "ind->vif_idx >= NX_VIRT_DEV_MAX",
+            "rwnx_rx_csa_counter_ind": "ind->vif_index >= NX_VIRT_DEV_MAX",
+            "rwnx_rx_csa_finish_ind": "ind->chan_idx >= NX_CHAN_CTXT_CNT",
+            "rwnx_rx_csa_traffic_ind": "ind->vif_index >= NX_VIRT_DEV_MAX",
+            "rwnx_rx_me_tkip_mic_failure_ind": "!rwnx_vif",
+            "rwnx_rx_me_tx_credits_update_ind": "ind->tid >= TID_MAX",
+        }
+        for name, check in checks.items():
+            with self.subTest(callback=name):
+                callback = c_function(self.msg_rx, name)
+                self.assertIn(check, callback)
+                self.assertIn("msg->param_len < sizeof(*ind)", callback)
+
+    def test_mesh_callbacks_check_fixed_payload_before_fields(self):
+        for name in ("rwnx_rx_mesh_peer_update_ind",
+                     "rwnx_rx_mesh_path_update_ind",
+                     "rwnx_rx_mesh_proxy_update_ind"):
+            with self.subTest(callback=name):
+                callback = c_function(self.msg_rx, name)
+                length_check = callback.index("msg->param_len < sizeof(*ind)")
+                first_field = callback.index("ind->")
+                self.assertLess(length_check, first_field)
+        create = c_function(self.msg_rx, "rwnx_rx_mesh_path_create_cfm")
+        self.assertLess(create.index("msg->param_len < sizeof(*cfm)"),
+                        create.index("cfm->vif_idx"))
+
     def test_reorder_tid_is_bounded_and_invalid_tid_skips_reordering(self):
         flush = c_function(self.rx, "reord_flush_tid")
         flush_guard = flush.index("tid >= ARRAY_SIZE")
