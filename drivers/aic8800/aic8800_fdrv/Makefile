@@ -16,6 +16,7 @@ RWNX_VERS_NUM := 6.4.3.0
 
 CONFIG_AIC8800_WLAN_SUPPORT = m
 MODULE_NAME = aic8800_fdrv
+CONFIG_AICWF_RX_KUNIT_TEST ?= n
 CONFIG_COUNTRY_CODE = "00"
 
 # Support of bootrom start
@@ -233,6 +234,11 @@ $(MODULE_NAME)-$(CONFIG_USB_SUPPORT)     += aicwf_txrxif.o
 $(MODULE_NAME)-$(CONFIG_USB_SUPPORT)     += aicwf_usb.o
 $(MODULE_NAME)-$(CONFIG_USE_WIRELESS_EXT)	 += aicwf_wext_linux.o
 $(MODULE_NAME)-$(CONFIG_GKI)    += rwnx_gki.o
+
+obj-$(CONFIG_AICWF_RX_KUNIT_TEST) += aicwf_rx_kunit.o
+ifneq ($(CONFIG_AICWF_RX_KUNIT_TEST),n)
+ccflags-y += -DCONFIG_AICWF_RX_KUNIT_TEST
+endif
 
 ccflags-$(CONFIG_DEBUG_FS) += -DCONFIG_RWNX_DEBUGFS
 ccflags-$(CONFIG_DEBUG_FS) += -DCONFIG_RWNX_UM_HELPER_DFLT=\"$(CONFIG_RWNX_UM_HELPER_DFLT)\"

@@ -75,6 +75,8 @@ struct aicwf_bus_ops {
     int (*txmsg) (struct device * dev, u8 * msg, uint len);
 };
 
+bool aicwf_rx_pkt_len_valid(const u8 *data, size_t available);
+
 struct frame_queue {
     u16              num_prio;
     u16              hi_prio;

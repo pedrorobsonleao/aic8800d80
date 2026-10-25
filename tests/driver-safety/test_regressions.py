@@ -93,6 +93,7 @@ class DriverSafetyRegressions(unittest.TestCase):
         cls.msg_tx = (FDRV / "rwnx_msg_tx.c").read_text(encoding="utf-8")
         cls.msg_rx = (FDRV / "rwnx_msg_rx.c").read_text(encoding="utf-8")
         cls.tcp_ack = (FDRV / "aicwf_tcp_ack.c").read_text(encoding="utf-8")
+        cls.rx_kunit = (FDRV / "aicwf_rx_kunit.c").read_text(encoding="utf-8")
 
     def test_consumed_tx_skb_is_not_returned_as_busy(self):
         for function_name in ("intf_tx", "rwnx_start_xmit"):
@@ -206,6 +207,19 @@ class DriverSafetyRegressions(unittest.TestCase):
         self.assertLess(chain_guard, detector)
         self.assertLess(detector, pulse_array)
         self.assertIn("pulses->cnt > RADAR_PULSE_MAX", radar)
+
+    def test_kernel_rx_parser_suite_injects_malformed_frames(self):
+        self.assertIn('"aicwf-rx-parser"', self.rx_kunit)
+        for case in (
+            "aicwf_rx_rejects_short_headers",
+            "aicwf_rx_checks_data_frame_extent",
+            "aicwf_rx_checks_command_response_lengths",
+            "aicwf_rx_checks_command_header_and_confirmation",
+            "aicwf_rx_rejects_zero_and_overflowing_lengths",
+        ):
+            with self.subTest(case=case):
+                self.assertIn(f"KUNIT_CASE({case})", self.rx_kunit)
+        self.assertIn("CONFIG_AICWF_RX_KUNIT_TEST", (FDRV / "Makefile").read_text())
 
     def test_station_state_callbacks_bound_payload_and_association_ie_lengths(self):
         connect = c_function(self.msg_rx, "rwnx_rx_sm_connect_ind")

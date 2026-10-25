@@ -103,6 +103,14 @@ os testes de runtime.
    atualizações mesh. Uma revisão das próprias guardas encontrou e corrigiu
    também logs de erro que ainda liam os campos `len` quando só havia um
    cabeçalho truncado. Os 25 testes estruturais passaram e o objeto recompilou.
+   Foi acrescentada uma suíte KUnit que chama o validador de comprimento de
+   transporte usado em produção com quadros RX sintéticos malformados
+   (cabeçalho/trama truncados, resposta de comando inconsistente, parâmetro
+   acima da capacidade e confirmação TX curta). Os 26 testes estruturais
+   passaram, e os objetos do driver e da suíte KUnit compilaram. Esta máquina
+   não tem `CONFIG_KUNIT` nem KASAN no kernel ativo, então a suíte ainda precisa
+   ser executada em um kernel de teste instrumentado; ela não injeta quadros no
+   firmware nem cobre diretamente cada callback de mensagem.
 
 3. **Buffer de comando SDIO — corrigido; validação em hardware pendente.**
    `aicwf_set_cmd_tx()` serializa cada mensagem no único `bus->cmd_buf` antes de

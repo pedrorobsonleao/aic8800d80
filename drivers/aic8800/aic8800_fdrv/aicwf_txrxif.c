@@ -320,7 +320,7 @@ void aicwf_tx_deinit(struct aicwf_tx_priv* tx_priv)
     kfree(tx_priv);
 }
 
-static bool aicwf_rx_pkt_len_valid(const u8 *data, size_t available)
+bool aicwf_rx_pkt_len_valid(const u8 *data, size_t available)
 {
 	size_t frame_len;
 	u16 pkt_len;
@@ -355,6 +355,10 @@ static bool aicwf_rx_pkt_len_valid(const u8 *data, size_t available)
 
 	return frame_len <= available;
 }
+
+#ifdef CONFIG_AICWF_RX_KUNIT_TEST
+EXPORT_SYMBOL_GPL(aicwf_rx_pkt_len_valid);
+#endif
 
 #ifdef CONFIG_PREALLOC_RX_SKB
 static bool aicwf_another_ptk_1(struct rx_buff *buffer)
