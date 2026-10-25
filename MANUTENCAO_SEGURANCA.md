@@ -79,16 +79,19 @@ os testes de runtime.
    exercitar entradas malformadas em hardware/sob sanitizadores; classificar
    como correção parcial com risco residual.
 
-3. **Buffer de comando SDIO — origem da mensagem copiada; serialização pendente.**
-   `aicwf_set_cmd_tx()` serializa `a2e_msg` em `bus->cmd_buf` antes de chamar
-   `aicwf_bus_txmsg()`, então o `kfree(cmd->a2e_msg)` posterior não prova, por
-   si só, uso após liberação da mensagem original. Porém,
-   `aicwf_sdio_bus_txmsg()` publica o ponteiro compartilhado em
-   `tx_priv->cmd_buf`, sinaliza o worker e retorna sem esperar a transmissão.
-   Verificar todas as chamadas concorrentes e a leitura/consumo do worker para
-   demonstrar que uma segunda serialização não sobrescreve o buffer antes do
-   envio. Estado: **a confirmar**; não aplicar correção até fechar o contrato
-   de sincronização.
+3. **Buffer de comando SDIO — risco de sobrescrita concorrente confirmado; correção pendente.**
+   `aicwf_set_cmd_tx()` serializa cada mensagem no único `bus->cmd_buf` antes de
+   chamar `aicwf_bus_txmsg()`. No SDIO, `aicwf_sdio_bus_txmsg()` publica esse
+   mesmo ponteiro em `tx_priv->cmd_buf`, sinaliza o worker e retorna antes da
+   transmissão. Além disso, `rwnx_send_msg_sized()` envia mensagens sem
+   confirmação diretamente, fora da fila serializada do command manager. Uma
+   segunda chamada concorrente pode sobrescrever os bytes enquanto o worker
+   ainda os consome. A mensagem original `a2e_msg` é copiada durante a
+   serialização; o problema é a propriedade do buffer compartilhado.
+   Implementar uma fila de mensagens SDIO com buffer próprio por comando (ou
+   protocolo equivalente que serialize preenchimento e consumo), incluindo
+   limpeza em falha/teardown. Validar build SDIO e caminhos simultâneos antes de
+   fechar o item; o hardware SDIO não está disponível nesta máquina.
 
 4. **Timers TCP ACK — teardown requer revisão de sincronização.**
    `tcp_ack_deinit()` desabilita o gerenciador e usa `del_timer()`/`timer_delete()`
@@ -126,10 +129,10 @@ com sucesso o módulo alterado no kernel `7.3.0-9-generic`. Não foram injetados
 frames malformados em hardware nem usados KASAN/UBSAN; a auditoria dos tamanhos
 mínimos lidos por cada callback continua aberta.
 
-Depois desses itens, continuar a auditoria de comprimentos/cópias e demais
-índices de mensagens RX do relatório original. Só então retomar otimizações de
-performance; as medições atuais de throughput não cobrem estabilidade de
-teardown, frames malformados ou transporte SDIO.
+Priorizar o buffer SDIO e o teardown dos timers TCP ACK antes de otimizações de
+performance. Depois, continuar a auditoria dos campos lidos por callbacks RX e
+dos demais itens de memória/cópia do relatório original; as medições atuais de
+throughput não cobrem frames malformados ou transporte SDIO.
 
 ## 1. Registrar e confirmar cada achado
 
