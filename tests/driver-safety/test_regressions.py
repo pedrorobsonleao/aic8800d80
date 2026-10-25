@@ -155,6 +155,25 @@ class DriverSafetyRegressions(unittest.TestCase):
         self.assertLess(ack_deinit, platform_off)
         self.assertLess(ack_deinit, cache_destroy)
 
+    def test_firmware_panic_and_assert_payloads_are_bounded(self):
+        panic = c_function(self.msg_rx, "rwnx_fw_panic_ind")
+        self.assertLess(panic.index("msg->param_len < sizeof(*ind)"),
+                        panic.index("memcpy(version"))
+
+        assertion = c_function(self.msg_rx, "rwnx_fw_assert_ind")
+        guard = assertion.index("ind->len >= sizeof(buffer)")
+        copy = assertion.index("memcpy(buffer, ind->info, ind->len)")
+        self.assertLess(assertion.index("msg->param_len < offsetof"), guard)
+        self.assertLess(guard, copy)
+        self.assertIn("ind->len > msg->param_len - offsetof", assertion)
+
+    def test_unknown_firmware_survey_frequency_does_not_trigger_bug(self):
+        mapper = c_function(self.msg_rx, "rwnx_freq_to_idx")
+        self.assertIn("return -ENOENT", mapper)
+        self.assertNotIn("BUG_ON", mapper)
+        survey = c_function(self.msg_rx, "rwnx_rx_channel_survey_ind")
+        self.assertLess(survey.index("idx < 0"), survey.index("&rwnx_hw->survey[idx]"))
+
     def test_reorder_tid_is_bounded_and_invalid_tid_skips_reordering(self):
         flush = c_function(self.rx, "reord_flush_tid")
         flush_guard = flush.index("tid >= ARRAY_SIZE")

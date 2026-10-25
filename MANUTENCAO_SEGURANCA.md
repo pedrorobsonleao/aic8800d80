@@ -77,7 +77,12 @@ os testes de runtime.
    `rwnx_msg_rx.c` também confere o índice da task e da mensagem contra o
    tamanho da tabela. Ainda falta auditar os campos que cada callback lê e
    exercitar entradas malformadas em hardware/sob sanitizadores; classificar
-   como correção parcial com risco residual.
+   como correção parcial com risco residual. Nesta rodada, as notificações de
+   panic/assert agora validam o tamanho total e o comprimento interno antes de
+   copiar dados; frequência de canal desconhecida retorna `-ENOENT` em vez de
+   acionar `BUG_ON`. Os 19 testes estruturais passaram e `rwnx_msg_rx.o`
+   compilou no kernel `7.3.0-9-generic`. Falta exercitar mensagens malformadas
+   em runtime/sanitizadores e continuar a auditoria dos outros callbacks.
 
 3. **Buffer de comando SDIO — corrigido; validação em hardware pendente.**
    `aicwf_set_cmd_tx()` serializa cada mensagem no único `bus->cmd_buf` antes de

@@ -52,7 +52,7 @@ static int rwnx_freq_to_idx(struct rwnx_hw *rwnx_hw, int freq)
         }
     }
 
-    BUG_ON(1);
+    return -ENOENT;
 
 exit:
     // Channel has been found, return the index
@@ -1665,6 +1665,12 @@ static inline int rwnx_fw_panic_ind(struct rwnx_hw *rwnx_hw,
     struct fault_ctxt fault;
     uint32_t msp[64];
     uint8_t i;
+
+    if (msg->param_len < sizeof(*ind)) {
+        pr_err("%s: truncated panic message (%u bytes)\n",
+               __func__, msg->param_len);
+        return -EMSGSIZE;
+    }
     memcpy(version, ind->info, 36);
     version[35] = '\0';
     memcpy(&fault, &ind->info[36], sizeof(struct fault_ctxt));
@@ -1697,6 +1703,14 @@ static inline int rwnx_fw_assert_ind(struct rwnx_hw *rwnx_hw,
 {
     struct fw_assert_info_ind *ind = (struct fw_assert_info_ind *)msg->param;
     uint8_t buffer[256];
+
+    if (msg->param_len < offsetof(struct fw_assert_info_ind, info) ||
+        ind->len >= sizeof(buffer) ||
+        ind->len > msg->param_len - offsetof(struct fw_assert_info_ind, info)) {
+        pr_err("%s: invalid assert message length (%u, payload %u)\n",
+               __func__, ind->len, msg->param_len);
+        return -EMSGSIZE;
+    }
 
     memcpy(buffer, ind->info, ind->len);
     buffer[ind->len] = '\0';
