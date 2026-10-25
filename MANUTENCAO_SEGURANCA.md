@@ -24,13 +24,15 @@ Na revisão da árvore atual foram confirmados e corrigidos:
 - Alocação do buffer TCP ACK: retorna `NULL` imediatamente em falha de
   `kzalloc`, evitando `memset(NULL, ...)`; o chamador também verifica a falha e
   transmite pelo caminho TX normal sem filtro de ACK.
+- Reordenação RX: valida TID contra as 8 entradas de `preorder_ctrl`; TIDs fora
+  do intervalo seguem sem reordenação, evitando índice fora dos limites.
 
 Validação executada em 2026-10-25: `make -C drivers/aic8800` concluiu com
-sucesso contra `/lib/modules/7.3.0-9-generic/build` (x86_64), gerando os três
-módulos. A compilação emitiu warnings de fallthrough em outros caminhos e não
-gerou BTF por falta de `vmlinux`; não houve erro de compilação. Hardware USB e
-SDIO não foi exercitado, portanto o resultado confirma compilação, não operação
-em runtime.
+sucesso contra `/lib/modules/7.3.0-9-generic/build` (x86_64), inclusive após a
+proteção de TID, gerando os três módulos. A compilação emitiu warnings de
+fallthrough em outros caminhos e não gerou BTF por falta de `vmlinux`; não
+houve erro de compilação. Hardware USB e SDIO não foi exercitado, portanto o
+resultado confirma compilação, não operação em runtime.
 
 O achado de cópia da confirmação em `cmd->e2a_msg` continua **a confirmar e
 pendente de correção**. O protocolo limita o tamanho da mensagem, mas a API do
@@ -39,7 +41,7 @@ propagar esse tamanho desde cada chamador até o comando antes de limitar a cóp
 
 Próxima rodada de auditoria recomendada, antes de otimizações:
 
-1. Confirmar bounds checks de TID/STA/VIF e comprimento de frames no RX.
+1. Confirmar bounds checks de STA/VIF e comprimento de frames no RX.
 2. Rastrear submissão, cancelamento e liberação de URBs durante disconnect USB.
 3. Rastrear lifetime do buffer de comando enfileirado no transporte SDIO.
 4. Revisar cancelamento de timers e alocações sob spinlocks, incluindo teardown.

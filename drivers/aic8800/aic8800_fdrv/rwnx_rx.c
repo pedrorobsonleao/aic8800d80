@@ -1557,6 +1557,9 @@ int reord_flush_tid(struct aicwf_rx_priv *rx_priv, struct sk_buff *skb, u8 tid)
     struct recv_msdu *prframe;
     int ret;
 
+    if (tid >= ARRAY_SIZE(((struct reord_ctrl_info *)0)->preorder_ctrl))
+        return 0;
+
     if((rwnx_vif->wdev.iftype == NL80211_IFTYPE_STATION) || (rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT))
         mac = eh->h_dest;
     else if((rwnx_vif->wdev.iftype == NL80211_IFTYPE_AP) || (rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_GO))
@@ -1959,6 +1962,9 @@ int reord_process_unit(struct recv_msdu *pframe, struct aicwf_rx_priv *rx_priv, 
     pframe->is_amsdu = is_amsdu;
 
     if (ntohs(eh->h_proto) == ETH_P_PAE)
+        return reord_single_frame_ind(rx_priv, pframe);
+
+    if (tid >= ARRAY_SIZE(((struct reord_ctrl_info *)0)->preorder_ctrl))
         return reord_single_frame_ind(rx_priv, pframe);
 
     if((rwnx_vif->wdev.iftype == NL80211_IFTYPE_STATION) || (rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT))
