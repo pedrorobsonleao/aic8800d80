@@ -2154,7 +2154,7 @@ void remove_sec_hdr_mgmt_frame(struct hw_rxhdr *hw_rxhdr,struct sk_buff *skb)
 void rwnx_rxdata_process_amsdu(struct rwnx_hw *rwnx_hw, struct sk_buff *skb, u8 vif_idx,
                                         struct sk_buff_head *list)
 {
-	u16 len_alligned = 0;
+	u32 len_alligned = 0;
 	u16 sublen = 0;
 	struct sk_buff *sub_skb = NULL;
     struct rwnx_vif *rwnx_vif;
@@ -2168,12 +2168,15 @@ void rwnx_rxdata_process_amsdu(struct rwnx_hw *rwnx_hw, struct sk_buff *skb, u8 
         sub_skb = NULL;
         while (skb->len > 16) {
             sublen = (skb->data[12]<<8)|(skb->data[13]);
-            if (skb->len > (sublen+14))
-                len_alligned = roundup(sublen + 14, 4);
-            else if (skb->len == (sublen+14))
-                len_alligned = sublen+14;
-            else {
+            if (sublen < 6 || (u32)skb->len < (u32)sublen + 14) {
                 printk("accroding to amsdu: this will not happen\n");
+                break;
+            }
+            len_alligned = (u32)sublen + 14;
+            if (len_alligned < skb->len)
+                len_alligned = ALIGN(len_alligned, 4);
+            if (len_alligned > skb->len) {
+                printk("invalid amsdu subframe padding\n");
                 break;
             }
             //printk("sublen = %d, %x, %x, %x, %x\r\n", sublen,skb->data[0], skb->data[1], skb->data[12], skb->data[13]);
@@ -2191,7 +2194,7 @@ void rwnx_rxdata_process_amsdu(struct rwnx_hw *rwnx_hw, struct sk_buff *skb, u8 
             rwnx_vif = rwnx_rx_get_vif(rwnx_hw, vif_idx);
             if (!rwnx_vif) {
                 printk("frame received but no active vif (%d), skb->len:%u\n", vif_idx, skb->len);
-                //dev_kfree_skb(sub_skb);
+                dev_kfree_skb_any(sub_skb);
                 break;
             }
             __skb_queue_tail(list, sub_skb);

@@ -185,6 +185,9 @@ sudo dmesg
 
 ### Diagnostic Logging
 
+Para triagem e acompanhamento das questões de segurança e desempenho, consulte
+[o fluxo de manutenção](MANUTENCAO_SEGURANCA.md).
+
 Both `aic8800_fdrv` and `aic_load_fw` default to `aicwf_dbg_level=1`
 (`LOGERROR`), matching
 [Radxa's logging default](https://github.com/radxa-pkg/aic8800/blob/fce88024ed40279def034e203128e0892fdbcac3/debian/patches/fix-Lower-the-debugging-log-level.patch).

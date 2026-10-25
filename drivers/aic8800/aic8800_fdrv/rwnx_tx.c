@@ -1378,7 +1378,8 @@ int intf_tx(struct rwnx_hw *priv,struct msg_buf *msg)
 		kmem_cache_free(rwnx_hw->sw_txhdr_cache, sw_txhdr);
 		skb_pull(skb, headroom);
 		dev_kfree_skb_any(skb);
-		return NETDEV_TX_BUSY;
+		/* The skb was consumed above, so the qdisc must not retry it. */
+		return NETDEV_TX_OK;
 	}
 
 	/* Fill-in TX descriptor */
@@ -1470,13 +1471,15 @@ netdev_tx_t rwnx_start_xmit(struct sk_buff *skb, struct net_device *dev)
 #ifdef CONFIG_FILTER_TCP_ACK
 	if(cpu_to_le16(skb->len) <= MAX_TCP_ACK){
         msgbuf=intf_tcp_alloc_msg(msgbuf);
-        msgbuf->rwnx_vif=rwnx_vif;
-        msgbuf->skb=skb;
-        if(filter_send_tcp_ack(rwnx_hw,msgbuf,skb->data,cpu_to_le16(skb->len))){
-            return NETDEV_TX_OK;
-        }else{
-            move_tcpack_msg(rwnx_hw,msgbuf);
-            kfree(msgbuf);
+		if (msgbuf) {
+            msgbuf->rwnx_vif=rwnx_vif;
+            msgbuf->skb=skb;
+            if(filter_send_tcp_ack(rwnx_hw,msgbuf,skb->data,cpu_to_le16(skb->len))){
+                return NETDEV_TX_OK;
+            }else{
+                move_tcpack_msg(rwnx_hw,msgbuf);
+                kfree(msgbuf);
+            }
         }
 	}
 #endif
@@ -1594,7 +1597,8 @@ netdev_tx_t rwnx_start_xmit(struct sk_buff *skb, struct net_device *dev)
         kmem_cache_free(rwnx_hw->sw_txhdr_cache, sw_txhdr);
         skb_pull(skb, headroom);
         dev_kfree_skb_any(skb);
-        return NETDEV_TX_BUSY;
+        /* The skb was consumed above, so the qdisc must not retry it. */
+        return NETDEV_TX_OK;
     }
 
     /* Fill-in TX descriptor */

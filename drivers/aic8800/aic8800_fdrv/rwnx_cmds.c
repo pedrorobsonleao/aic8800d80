@@ -565,6 +565,12 @@ void aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
 {
     u8 *buffer = NULL;
     u16 index = 0;
+    if (!msg || len < sizeof(*msg) || msg->param_len != len - sizeof(*msg) ||
+        len > CMD_BUF_MAX - 8) {
+        printk(KERN_ERR "aicwf: invalid command length (%u, param %u)\n",
+               len, msg ? msg->param_len : 0);
+        return;
+    }
 #ifdef AICWF_SDIO_SUPPORT
 	struct aic_sdio_dev *sdiodev = (struct aic_sdio_dev *)dev;
     struct aicwf_bus *bus = sdiodev->bus_if;

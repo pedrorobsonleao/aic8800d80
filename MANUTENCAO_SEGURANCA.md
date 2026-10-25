@@ -1,0 +1,128 @@
+# Fluxo de manutenção de segurança e desempenho
+
+Este fluxo organiza a triagem e a correção dos itens levantados em
+`analise_seguranca_performance.md` (relatório externo, gerado em 2026-10-24).
+O relatório é uma entrada para investigação, não uma confirmação de bugs: valide
+código, contexto e configuração deste repositório antes de alterar o driver.
+Há divergência entre o resumo do metadata (9 críticas/14 altas) e o resumo do
+corpo do relatório (11 críticas/16 altas), então não use esses totais como
+métrica de progresso.
+
+## Validação e melhorias aplicadas
+
+Na revisão da árvore atual foram confirmados e corrigidos:
+
+- `rwnx_start_xmit`: o caminho de erro de `rwnx_prep_tx` liberava o SKB e
+  retornava `NETDEV_TX_BUSY`; agora informa que o pacote foi consumido.
+- Parser AMSDU RX: `sublen` podia ser menor que 6 e sofrer underflow; agora
+  valida o tamanho mínimo, o comprimento do subframe e o padding antes de
+  alocar/copiar, e libera o sub-SKB se não houver VIF.
+- Probe USB: em falha parcial das alocações `vmalloc`, liberava o objeto errado
+  e repetia a liberação; agora libera os buffers individualmente e o objeto.
+- Envio de comando: verifica consistência entre `len` e `param_len` e que o
+  frame cabe em `CMD_BUF_MAX` antes de preencher o buffer compartilhado.
+- Alocação do buffer TCP ACK: retorna `NULL` imediatamente em falha de
+  `kzalloc`, evitando `memset(NULL, ...)`; o chamador também verifica a falha e
+  transmite pelo caminho TX normal sem filtro de ACK.
+
+Validação executada em 2026-10-25: `make -C drivers/aic8800` concluiu com
+sucesso contra `/lib/modules/7.3.0-9-generic/build` (x86_64), gerando os três
+módulos. A compilação emitiu warnings de fallthrough em outros caminhos e não
+gerou BTF por falta de `vmlinux`; não houve erro de compilação. Hardware USB e
+SDIO não foi exercitado, portanto o resultado confirma compilação, não operação
+em runtime.
+
+O achado de cópia da confirmação em `cmd->e2a_msg` continua **a confirmar e
+pendente de correção**. O protocolo limita o tamanho da mensagem, mas a API do
+comando não registra a capacidade do buffer de destino. A correção precisa
+propagar esse tamanho desde cada chamador até o comando antes de limitar a cópia.
+
+Próxima rodada de auditoria recomendada, antes de otimizações:
+
+1. Confirmar bounds checks de TID/STA/VIF e comprimento de frames no RX.
+2. Rastrear submissão, cancelamento e liberação de URBs durante disconnect USB.
+3. Rastrear lifetime do buffer de comando enfileirado no transporte SDIO.
+4. Revisar cancelamento de timers e alocações sob spinlocks, incluindo teardown.
+5. Auditar os demais itens de memória/cópia e só então revisar performance.
+
+Esses pontos vêm do relatório original e ainda não foram confirmados nesta
+rodada; não devem ser tratados como bugs estabelecidos sem inspeção do caminho
+completo.
+
+## 1. Registrar e confirmar cada achado
+
+Para cada item, abra uma issue ou tarefa com: ID do relatório, arquivo e função
+(mais confiáveis que números de linha), configuração afetada (USB/SDIO,
+firmware, kernel), caminho de entrada, impacto demonstrável, evidência e
+responsável. Números de linha mudam e podem não corresponder à árvore atual.
+
+Classifique o estado como **a confirmar**, **confirmado**, **não reproduzido**,
+**falso positivo** ou **corrigido**. Inspecione os chamadores, tipos e limites,
+caminhos de erro e sincronização. Não aceite a severidade nem o patch proposto
+no relatório sem essa revisão. Por exemplo, o retorno `NETDEV_TX_BUSY` exige
+confirmar a propriedade do SKB em todos os caminhos; uma substituição mecânica
+por `NETDEV_TX_OK` também pode ocultar perda de pacote.
+
+## 2. Ordenar o trabalho
+
+Trate primeiro problemas confirmados que permitam escrita/leitura fora dos
+limites, uso após liberação, corrupção de memória ou travamento por entrada
+externa. Depois trate corridas e falhas de teardown; em seguida estabilidade e
+desempenho. Dentro de cada classe, prefira reproduções alcançáveis sem
+privilégios e com impacto maior. P0/P1/P2 no relatório são prioridades
+provisórias, não uma classificação de risco concluída.
+
+Agrupe apenas mudanças que compartilhem o mesmo caminho e possam ser revistas
+em conjunto. Mantenha cada correção pequena e independente, incluindo validação
+de limites, propriedade de buffers, sincronização e limpeza de recursos quando
+aplicável. Documente qualquer achado que não for corrigido e a justificativa.
+
+## 3. Corrigir com revisão focada
+
+Cada alteração deve explicar a condição inválida, preservar o contrato da API do
+kernel e cobrir todos os caminhos de sucesso e falha. Em particular:
+
+- valide comprimentos antes de subtrair, somar, indexar ou copiar;
+- valide índices vindos de firmware/pacotes antes de acessar arrays;
+- confira contexto de execução e permissões de alocação antes de dormir;
+- defina explicitamente quem possui SKB/URB/buffers em cada retorno;
+- cancele e aguarde callbacks antes de liberar estado USB/SDIO;
+- não mova chamadas para fora de locks sem reavaliar lifetime e ordenação;
+- não use `BUG()` para condições alcançáveis por tráfego ou firmware externo.
+
+Peça revisão de alguém familiarizado com o caminho afetado e com a API de rede,
+USB ou SDIO correspondente. Para mudanças de concorrência, inclua a sequência de
+lock/unlock e teardown na descrição.
+
+## 4. Validar cada correção
+
+Antes de integrar, registre os comandos e resultados usados. No mínimo, compile
+contra os kernels/configurações suportados relevantes. Para correções de
+protocolo ou memória, acrescente um caso reproduzível ou teste de regressão
+apropriado; para concorrência e teardown, exercite carga, desconexão e
+reconexão. Quando disponíveis, use ferramentas de diagnóstico do kernel
+(por exemplo, KASAN, lockdep e UBSAN) em ambiente de teste. Não exponha uma
+máquina de uso diário a reproduções que possam travar o kernel.
+
+Valide separadamente USB e SDIO quando o código corrigido for compartilhado ou
+quando ambos implementarem o mesmo contrato. Registre kernel, arquitetura,
+configuração, chipset/firmware e resultado. Uma compilação bem-sucedida não
+confirma segurança funcional.
+
+## 5. Encerrar e acompanhar
+
+Marque como corrigido somente quando a mudança estiver integrada, a regressão
+for coberta (ou a limitação estiver documentada) e as validações estiverem
+registradas. Atualize o relatório/backlog com commit ou referência da mudança,
+resultado e risco residual. Reabra se uma nova reprodução contradisser a
+conclusão. Revise achados pendentes a cada ciclo de manutenção e após mudanças
+grandes no kernel, transporte ou firmware.
+
+## Critério de pronto por correção
+
+- [ ] Achado confirmado no código e no contexto correto.
+- [ ] Impacto e condição de disparo documentados.
+- [ ] Correção pequena, revisada e sem mudança de contrato inadvertida.
+- [ ] Compilação e validação funcional relevantes registradas.
+- [ ] Regressão automatizada ou procedimento reproduzível documentado.
+- [ ] Backlog atualizado com evidência e risco residual.

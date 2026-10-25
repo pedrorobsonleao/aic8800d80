@@ -8,8 +8,10 @@ struct msg_buf *intf_tcp_alloc_msg(struct msg_buf *msg)
 	//printk("%s \n",__func__);
 	int len=sizeof(struct msg_buf) ;
 	msg = kzalloc(len , GFP_ATOMIC);
-	if(!msg)
+	if (!msg) {
 		printk("%s: alloc failed \n", __func__);
+		return NULL;
+	}
 	memset(msg,0,len);
 	return msg;
 }
