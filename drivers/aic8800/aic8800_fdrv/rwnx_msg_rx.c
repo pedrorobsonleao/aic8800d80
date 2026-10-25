@@ -414,9 +414,17 @@ static inline int rwnx_radar_detect_ind(struct rwnx_hw *rwnx_hw,
     RWNX_DBG(RWNX_FN_ENTRY_STR);
     //printk("%s\n", __func__);
 
-    if(pulses->cnt == 0) {
-		printk("cnt error\n");
-		return -1;
+	if (msg->param_len < sizeof(*pulses)) {
+		pr_warn("%s: truncated radar pulse message (%u bytes)\n",
+			__func__, msg->param_len);
+		return -EMSGSIZE;
+	}
+
+	if (pulses->idx >= RWNX_RADAR_LAST ||
+	    pulses->cnt == 0 || pulses->cnt > RADAR_PULSE_MAX) {
+		pr_warn("%s: invalid radar pulse message (idx %u, count %u, len %u)\n",
+			__func__, pulses->idx, pulses->cnt, msg->param_len);
+		return -EMSGSIZE;
     }
 
 	if(rwnx_radar_detection_is_enable(&rwnx_hw->radar, pulses->idx)) {

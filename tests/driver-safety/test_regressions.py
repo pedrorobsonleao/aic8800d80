@@ -192,6 +192,17 @@ class DriverSafetyRegressions(unittest.TestCase):
         self.assertLess(guard, clamp)
         self.assertLess(clamp, terminator)
 
+    def test_radar_indication_checks_payload_and_chain_before_indexing(self):
+        radar = c_function(self.msg_rx, "rwnx_radar_detect_ind")
+        length_guard = radar.index("msg->param_len < sizeof(*pulses)")
+        chain_guard = radar.index("pulses->idx >= RWNX_RADAR_LAST")
+        detector = radar.index("rwnx_radar_detection_is_enable")
+        pulse_array = radar.index("radar.pulses[pulses->idx]")
+        self.assertLess(length_guard, chain_guard)
+        self.assertLess(chain_guard, detector)
+        self.assertLess(detector, pulse_array)
+        self.assertIn("pulses->cnt > RADAR_PULSE_MAX", radar)
+
     def test_reorder_tid_is_bounded_and_invalid_tid_skips_reordering(self):
         flush = c_function(self.rx, "reord_flush_tid")
         flush_guard = flush.index("tid >= ARRAY_SIZE")

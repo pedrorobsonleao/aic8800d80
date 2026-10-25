@@ -90,7 +90,10 @@ os testes de runtime.
    `rwnx_msg_rx.o` recompilou com sucesso. O handler de logs do firmware agora
    ignora entrada nula/vazia e limita o tamanho copiado ao buffer circular de
    logs. Após essa alteração, 21 testes estruturais passaram e o objeto foi
-   recompilado sem warnings novos.
+   recompilado sem warnings novos. A indicação de pulsos de radar agora exige
+   o tamanho completo da estrutura e valida chain/count antes de acessar as
+   tabelas do detector; os 22 testes estruturais passaram e `rwnx_msg_rx.o`
+   compilou novamente.
 
 3. **Buffer de comando SDIO — corrigido; validação em hardware pendente.**
    `aicwf_set_cmd_tx()` serializa cada mensagem no único `bus->cmd_buf` antes de
