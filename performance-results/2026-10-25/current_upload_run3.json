@@ -1,0 +1,18 @@
+{
+  "target": "192.168.15.45",
+  "interface": "wlx688fc9a24e57",
+  "ping": {
+    "packet_loss_percent": 5.0,
+    "rtt_min_ms": 8.261,
+    "rtt_avg_ms": 12.566,
+    "rtt_max_ms": 28.414,
+    "rtt_jitter_ms": 5.451,
+    "exit_code": 0
+  },
+  "iperf3": {
+    "direction": "upload",
+    "throughput_mbps": 29.355,
+    "retransmits": 102,
+    "exit_code": 0
+  }
+}

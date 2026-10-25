@@ -1,0 +1,19 @@
+{
+  "target": "192.168.15.45",
+  "interface": "wlx688fc9a24e57",
+  "ping": {
+    "packet_loss_percent": 0.0,
+    "rtt_min_ms": 6.981,
+    "rtt_avg_ms": 14.64,
+    "rtt_max_ms": 59.992,
+    "rtt_jitter_ms": 15.165,
+    "exit_code": 0,
+    "details": " from 192.168.15.45: icmp_seq=7 ttl=64 time=6.98 ms\n64 bytes from 192.168.15.45: icmp_seq=8 ttl=64 time=8.14 ms\n64 bytes from 192.168.15.45: icmp_seq=9 ttl=64 time=7.55 ms\n64 bytes from 192.168.15.45: icmp_seq=10 ttl=64 time=7.68 ms\n64 bytes from 192.168.15.45: icmp_seq=11 ttl=64 time=9.98 ms\n64 bytes from 192.168.15.45: icmp_seq=12 ttl=64 time=7.88 ms\n64 bytes from 192.168.15.45: icmp_seq=13 ttl=64 time=58.3 ms\n64 bytes from 192.168.15.45: icmp_seq=14 ttl=64 time=9.17 ms\n64 bytes from 192.168.15.45: icmp_seq=15 ttl=64 time=10.9 ms\n64 bytes from 192.168.15.45: icmp_seq=16 ttl=64 time=22.3 ms\n64 bytes from 192.168.15.45: icmp_seq=17 ttl=64 time=7.49 ms\n64 bytes from 192.168.15.45: icmp_seq=18 ttl=64 time=9.13 ms\n64 bytes from 192.168.15.45: icmp_seq=19 ttl=64 time=8.44 ms\n64 bytes from 192.168.15.45: icmp_seq=20 ttl=64 time=8.43 ms\n\n--- 192.168.15.45 ping statistics ---\n20 packets transmitted, 20 received, 0% packet loss, time 19027ms\nrtt min/avg/max/mdev = 6.981/14.640/59.992/15.165 ms"
+  },
+  "iperf3": {
+    "direction": "upload",
+    "throughput_mbps": 35.12,
+    "retransmits": 411,
+    "exit_code": 0
+  }
+}
