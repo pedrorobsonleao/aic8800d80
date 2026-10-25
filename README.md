@@ -50,7 +50,9 @@ quirk is filtered to that VID:PID and fails closed when the required kernel
 probe support is unavailable.
 
 ### Disclaimer
-I did not develop this software, The code is sourced from the Tenda U11 driver. I only made some modifications to the code to adapt it to newer kernel versions. Apart from compilation issues, I am unable to address other problems.
+I did not develop this software. The code is based on the Tenda U11 driver, with
+modifications to support newer kernel versions. I can help with build issues,
+but may not be able to resolve other problems.
 
 ### License
 
@@ -99,6 +101,9 @@ For Arch-based distributions (Arch, CachyOS, …), see
 [Arch Linux / CachyOS install notes](INSTALL_ARCH.md) — including the AUR/DKMS
 path, matching kernel headers, mode-switch configuration, and module-index
 troubleshooting.
+
+For source checks, kernel builds, KUnit, and link-performance measurements, see
+the [testing guide](TESTING.md).
 
 #### Method 1: [Quick Installation](INSTALL_SCRIPT.md) (Recommended)
 
@@ -185,8 +190,8 @@ sudo dmesg
 
 ### Diagnostic Logging
 
-Para triagem e acompanhamento das questões de segurança e desempenho, consulte
-[o fluxo de manutenção](MANUTENCAO_SEGURANCA.md).
+For security and performance triage and follow-up, see the
+[security and performance maintenance guide](SECURITY_MAINTENANCE.md).
 
 Both `aic8800_fdrv` and `aic_load_fw` default to `aicwf_dbg_level=1`
 (`LOGERROR`), matching
