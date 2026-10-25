@@ -184,6 +184,14 @@ class DriverSafetyRegressions(unittest.TestCase):
         self.assertIn("if (!scan_re_wext->ind || !scan_re_wext->payload)", scan)
         self.assertIn("vfree(scan_re_wext->payload)", scan)
 
+    def test_firmware_log_rejects_empty_input_and_caps_ring_copy(self):
+        function = c_function(self.msg_rx, "rwnx_rx_handle_print")
+        guard = function.index("if (!rwnx_hw || !msg || !len)")
+        clamp = function.index("len = min_t(u32, len, FW_LOG_SIZE)")
+        terminator = function.index("msg[len-1] = '\\0'")
+        self.assertLess(guard, clamp)
+        self.assertLess(clamp, terminator)
+
     def test_reorder_tid_is_bounded_and_invalid_tid_skips_reordering(self):
         flush = c_function(self.rx, "reord_flush_tid")
         flush_guard = flush.index("tid >= ARRAY_SIZE")
