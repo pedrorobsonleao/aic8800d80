@@ -30,6 +30,9 @@ Na revisão da árvore atual foram confirmados e corrigidos:
   o tamanho do protocolo é limitado antes de callbacks, e respostas maiores
   que o destino são rejeitadas antes da cópia, completam o comando com
   `-EMSGSIZE` e propagam esse erro ao chamador.
+- Mensagens RX do firmware: valida índices de VIF/STA antes de consultar as
+  tabelas em notificações P2P, RSSI, perda de pacotes, conexão/desconexão e
+  mesh; também rejeita índices de canal negativos ou fora do array de survey.
 
 Validação executada em 2026-10-25: `make -C drivers/aic8800` concluiu com
 sucesso contra `/lib/modules/7.3.0-9-generic/build` (x86_64), inclusive após a
@@ -40,14 +43,15 @@ por falta de `vmlinux`; não houve erro de compilação. Hardware USB e SDIO nã
 foi exercitado, portanto o resultado confirma compilação, não operação em
 runtime.
 
-O achado de cópia da confirmação em `cmd->e2a_msg` continua **a confirmar e
-pendente de correção**. O protocolo limita o tamanho da mensagem, mas a API do
-comando não registra a capacidade do buffer de destino. A correção precisa
-propagar esse tamanho desde cada chamador até o comando antes de limitar a cópia.
+Na rodada seguinte foram incluídas validações dos índices usados por mensagens
+RX de firmware. As 10 verificações de segurança passaram e `make -C
+drivers/aic8800` compilou novamente os três módulos no mesmo kernel. A
+compilação manteve warnings de fallthrough em caminhos existentes e não gerou
+BTF por falta de `vmlinux`.
 
 Próxima rodada de auditoria recomendada, antes de otimizações:
 
-1. Completar a auditoria de comprimento de frames RX e índices restantes em handlers de mensagens do firmware.
+1. Completar auditoria de comprimentos de frames RX e dos demais índices diretos em handlers de mensagens do firmware.
 2. Rastrear submissão, cancelamento e liberação de URBs durante disconnect USB.
 3. Rastrear lifetime do buffer de comando enfileirado no transporte SDIO.
 4. Revisar cancelamento de timers e alocações sob spinlocks, incluindo teardown.

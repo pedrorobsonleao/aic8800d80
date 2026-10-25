@@ -286,6 +286,8 @@ static inline int rwnx_rx_p2p_vif_ps_change_ind(struct rwnx_hw *rwnx_hw,
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
 #ifdef CONFIG_RWNX_FULLMAC
+    if (vif_idx < 0 || vif_idx >= NX_VIRT_DEV_MAX)
+        return 0;
     vif_entry = rwnx_hw->vif_table[vif_idx];
 
     if (vif_entry) {
@@ -326,7 +328,7 @@ static inline int rwnx_rx_channel_survey_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (idx >  ARRAY_SIZE(rwnx_hw->survey))
+    if (idx < 0 || idx >= ARRAY_SIZE(rwnx_hw->survey))
         return 0;
 
     rwnx_survey = &rwnx_hw->survey[idx];
@@ -365,6 +367,8 @@ static inline int rwnx_rx_rssi_status_ind(struct rwnx_hw *rwnx_hw,
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
 #ifdef CONFIG_RWNX_FULLMAC
+    if (vif_idx < 0 || vif_idx >= NX_VIRT_DEV_MAX)
+        return 0;
     vif_entry = rwnx_hw->vif_table[vif_idx];
     if (vif_entry) {
         cfg80211_cqm_rssi_notify(vif_entry->ndev,
@@ -388,6 +392,8 @@ static inline int rwnx_rx_pktloss_notify_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
+    if (vif_idx < 0 || vif_idx >= NX_VIRT_DEV_MAX)
+        return 0;
     vif_entry = rwnx_hw->vif_table[vif_idx];
     if (vif_entry) {
         cfg80211_cqm_pktloss_notify(vif_entry->ndev, (const u8 *)ind->mac_addr.array,
@@ -928,7 +934,7 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
                                          struct ipc_e2a_msg *msg)
 {
     struct sm_connect_ind *ind = (struct sm_connect_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    struct rwnx_vif *rwnx_vif;
     struct net_device *dev = NULL;
     const u8 *req_ie, *rsp_ie;
     const u8 *extcap_ie;
@@ -939,6 +945,11 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
     //int retry_counter = 10;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (ind->vif_idx >= NX_VIRT_DEV_MAX ||
+        ind->ap_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+        return 1;
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
 	
 	if(!rwnx_vif){
 		AICWFDBG(LOGERROR, "%s rwnx_vif is null \r\n", __func__);
@@ -1199,13 +1210,22 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
                                             struct ipc_e2a_msg *msg)
 {
     struct sm_disconnect_ind *ind = (struct sm_disconnect_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    struct rwnx_vif *rwnx_vif;
     struct net_device *dev;
 #ifdef AICWF_RX_REORDER
     struct reord_ctrl_info *reord_info, *tmp;
     u8 *macaddr;
     struct aicwf_rx_priv *rx_priv;
 #endif
+
+    if (ind->vif_idx >= NX_VIRT_DEV_MAX)
+        return 1;
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    if (!rwnx_vif) {
+        AICWFDBG(LOGERROR, "%s rwnx_vif is null for index %u\n",
+                 __func__, ind->vif_idx);
+        return 1;
+    }
 
     //RWNX_DBG(RWNX_FN_ENTRY_STR);
     AICWFDBG(LOGINFO, "%s reason code:%d \r\n", __func__, ind->reason_code);
@@ -1216,11 +1236,6 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
 
     dhcped = 0;
 
-    if(!rwnx_vif){
-		AICWFDBG(LOGERROR, "%s rwnx_vif is null \r\n", __func__);
-		//atomic_set(&rwnx_vif->drv_conn_state, RWNX_DRV_STATUS_DISCONNECTED);
-        return 0;
-    }
     dev = rwnx_vif->ndev;
 	if (rwnx_vif->sta.is_roam == false) {
 		rwnx_cfg80211_unlink_bss(rwnx_hw, rwnx_vif);
@@ -1303,15 +1318,23 @@ static inline int rwnx_rx_sm_external_auth_required_ind(struct rwnx_hw *rwnx_hw,
 {
     struct sm_external_auth_required_ind *ind =
         (struct sm_external_auth_required_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    struct rwnx_vif *rwnx_vif;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0) || defined(CONFIG_WPA3_FOR_OLD_KERNEL)
-    struct net_device *dev = rwnx_vif->ndev;
+    struct net_device *dev;
     struct cfg80211_external_auth_params params;
 	int ret = 0;
-	struct wireless_dev *wdev = dev->ieee80211_ptr;
+	struct wireless_dev *wdev;
 	int retry_counter = 10;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (ind->vif_idx >= NX_VIRT_DEV_MAX)
+        return 1;
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    if (!rwnx_vif)
+        return 1;
+    dev = rwnx_vif->ndev;
+    wdev = dev->ieee80211_ptr;
 
     memset((void*)&params, 0, sizeof(struct cfg80211_external_auth_params));
 
@@ -1332,7 +1355,7 @@ static inline int rwnx_rx_sm_external_auth_required_ind(struct rwnx_hw *rwnx_hw,
 	}
 	AICWFDBG(LOGINFO, "%s wdev->conn_owner_nlportid:%d \r\n", __func__, (int)wdev->conn_owner_nlportid);
 
-    if ((ind->vif_idx > NX_VIRT_DEV_MAX) || !rwnx_vif->up ||
+    if (!rwnx_vif->up ||
         (RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_STATION) ||
         (ret = cfg80211_external_auth_request(dev, &params, GFP_ATOMIC))) {
 		wiphy_err(rwnx_hw->wiphy, "Failed to start external auth on vif %d, rwnx_vif->up %d, iftype:%d, ret %d",
@@ -1344,6 +1367,11 @@ static inline int rwnx_rx_sm_external_auth_required_ind(struct rwnx_hw *rwnx_hw,
 
     rwnx_external_auth_enable(rwnx_vif);
 #else
+    if (ind->vif_idx >= NX_VIRT_DEV_MAX)
+        return 1;
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    if (!rwnx_vif)
+        return 1;
     rwnx_send_sm_external_auth_required_rsp(rwnx_hw, rwnx_vif,
                                             WLAN_STATUS_UNSPECIFIED_FAILURE);
 #endif
@@ -1356,9 +1384,13 @@ static inline int rwnx_rx_mesh_path_create_cfm(struct rwnx_hw *rwnx_hw,
                                                struct ipc_e2a_msg *msg)
 {
     struct mesh_path_create_cfm *cfm = (struct mesh_path_create_cfm *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[cfm->vif_idx];
+    struct rwnx_vif *rwnx_vif;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (cfm->vif_idx >= NX_VIRT_DEV_MAX)
+        return 1;
+    rwnx_vif = rwnx_hw->vif_table[cfm->vif_idx];
 
     /* Check we well have a Mesh Point Interface */
     if (rwnx_vif && (RWNX_VIF_TYPE(rwnx_vif) == NL80211_IFTYPE_MESH_POINT)) {
@@ -1373,14 +1405,17 @@ static inline int rwnx_rx_mesh_peer_update_ind(struct rwnx_hw *rwnx_hw,
                                                struct ipc_e2a_msg *msg)
 {
     struct mesh_peer_update_ind *ind = (struct mesh_peer_update_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
-    struct rwnx_sta *rwnx_sta = &rwnx_hw->sta_table[ind->sta_idx];
+    struct rwnx_vif *rwnx_vif;
+    struct rwnx_sta *rwnx_sta;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if ((ind->vif_idx >= (NX_VIRT_DEV_MAX + NX_REMOTE_STA_MAX)) ||
-        (rwnx_vif && (RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_MESH_POINT)) ||
-        (ind->sta_idx >= NX_REMOTE_STA_MAX))
+    if (ind->vif_idx >= NX_VIRT_DEV_MAX ||
+        ind->sta_idx >= NX_REMOTE_STA_MAX)
+        return 1;
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    rwnx_sta = &rwnx_hw->sta_table[ind->sta_idx];
+    if (!rwnx_vif || RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_MESH_POINT)
         return 1;
 
     /* Check we well have a Mesh Point Interface */
@@ -1473,14 +1508,15 @@ static inline int rwnx_rx_mesh_path_update_ind(struct rwnx_hw *rwnx_hw,
                                                struct ipc_e2a_msg *msg)
 {
     struct mesh_path_update_ind *ind = (struct mesh_path_update_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    struct rwnx_vif *rwnx_vif;
     struct rwnx_mesh_path *mesh_path;
     bool found = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (ind->vif_idx >= (NX_VIRT_DEV_MAX + NX_REMOTE_STA_MAX))
+    if (ind->vif_idx >= NX_VIRT_DEV_MAX)
         return 1;
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
 
     if (!rwnx_vif || (RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_MESH_POINT))
         return 0;
@@ -1506,6 +1542,8 @@ static inline int rwnx_rx_mesh_path_update_ind(struct rwnx_hw *rwnx_hw,
         }
     }
     else {
+        if (ind->nhop_sta_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
+            return 1;
         if (found) {
             // Update the Next Hop STA
             mesh_path->p_nhop_sta = &rwnx_hw->sta_table[ind->nhop_sta_idx];
@@ -1540,14 +1578,15 @@ static inline int rwnx_rx_mesh_proxy_update_ind(struct rwnx_hw *rwnx_hw,
                                                struct ipc_e2a_msg *msg)
 {
     struct mesh_proxy_update_ind *ind = (struct mesh_proxy_update_ind *)msg->param;
-    struct rwnx_vif *rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
+    struct rwnx_vif *rwnx_vif;
     struct rwnx_mesh_proxy *mesh_proxy;
     bool found = false;
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
-    if (ind->vif_idx >= (NX_VIRT_DEV_MAX + NX_REMOTE_STA_MAX))
+    if (ind->vif_idx >= NX_VIRT_DEV_MAX)
         return 1;
+    rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
 
     if (!rwnx_vif || (RWNX_VIF_TYPE(rwnx_vif) != NL80211_IFTYPE_MESH_POINT))
         return 0;

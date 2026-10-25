@@ -202,6 +202,41 @@ class DriverSafetyRegressions(unittest.TestCase):
         credit = c_function(self.tx, "rwnx_txq_credit_update")
         self.assertLess(credit.index("sta_idx < 0"), credit.index("sta_table[sta_idx]"))
 
+    def test_firmware_message_indices_are_checked_before_array_access(self):
+        msg_rx = self.msg_rx
+        for name in (
+            "rwnx_rx_p2p_vif_ps_change_ind",
+            "rwnx_rx_rssi_status_ind",
+            "rwnx_rx_pktloss_notify_ind",
+        ):
+            with self.subTest(function=name):
+                function = c_function(msg_rx, name)
+                guard = function.index("vif_idx >= NX_VIRT_DEV_MAX")
+                lookup = function.index("vif_table[vif_idx]")
+                self.assertLess(guard, lookup)
+
+        survey = c_function(msg_rx, "rwnx_rx_channel_survey_ind")
+        self.assertLess(survey.index("idx < 0 || idx >= ARRAY_SIZE"),
+                        survey.index("survey[idx]"))
+
+        connect = c_function(msg_rx, "rwnx_rx_sm_connect_ind")
+        self.assertLess(connect.index("ind->vif_idx >= NX_VIRT_DEV_MAX"),
+                        connect.index("vif_table[ind->vif_idx]"))
+        self.assertLess(connect.index("ind->ap_idx >= ARRAY_SIZE"),
+                        connect.index("sta_table[ind->ap_idx]"))
+
+        disconnect = c_function(msg_rx, "rwnx_rx_sm_disconnect_ind")
+        self.assertLess(disconnect.index("ind->vif_idx >= NX_VIRT_DEV_MAX"),
+                        disconnect.index("vif_table[ind->vif_idx]"))
+        self.assertLess(disconnect.index("if (!rwnx_vif)"),
+                        disconnect.index("rwnx_vif->drv_conn_state"))
+
+        mesh_path = c_function(msg_rx, "rwnx_rx_mesh_path_update_ind")
+        self.assertLess(mesh_path.index("ind->vif_idx >= NX_VIRT_DEV_MAX"),
+                        mesh_path.index("vif_table[ind->vif_idx]"))
+        self.assertLess(mesh_path.index("ind->nhop_sta_idx >= ARRAY_SIZE"),
+                        mesh_path.index("sta_table[ind->nhop_sta_idx]"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
