@@ -82,7 +82,12 @@ os testes de runtime.
    copiar dados; frequência de canal desconhecida retorna `-ENOENT` em vez de
    acionar `BUG_ON`. Os 19 testes estruturais passaram e `rwnx_msg_rx.o`
    compilou no kernel `7.3.0-9-generic`. Falta exercitar mensagens malformadas
-   em runtime/sanitizadores e continuar a auditoria dos outros callbacks.
+   em runtime/sanitizadores e continuar a auditoria dos outros callbacks. A
+   notificação de resultado de scan também confere o cabeçalho e o tamanho do
+   frame antes de acessar o beacon/probe response; as alocações opcionais do
+   caminho Wireless Extensions agora verificam falhas e liberam recursos
+   parciais. Na rodada atual, os 20 testes estruturais passaram e
+   `rwnx_msg_rx.o` recompilou com sucesso.
 
 3. **Buffer de comando SDIO — corrigido; validação em hardware pendente.**
    `aicwf_set_cmd_tx()` serializa cada mensagem no único `bus->cmd_buf` antes de

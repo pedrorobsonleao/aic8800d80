@@ -174,6 +174,16 @@ class DriverSafetyRegressions(unittest.TestCase):
         survey = c_function(self.msg_rx, "rwnx_rx_channel_survey_ind")
         self.assertLess(survey.index("idx < 0"), survey.index("&rwnx_hw->survey[idx]"))
 
+    def test_scan_result_frame_and_wireless_extensions_allocations_are_bounded(self):
+        scan = c_function(self.msg_rx, "rwnx_rx_scanu_result_ind")
+        guard = scan.index("ind->length > msg->param_len")
+        channel = scan.index("ieee80211_get_channel")
+        self.assertLess(scan.index("msg->param_len < offsetof"), guard)
+        self.assertLess(guard, channel)
+        self.assertIn("ind->length < offsetof(struct ieee80211_mgmt", scan)
+        self.assertIn("if (!scan_re_wext->ind || !scan_re_wext->payload)", scan)
+        self.assertIn("vfree(scan_re_wext->payload)", scan)
+
     def test_reorder_tid_is_bounded_and_invalid_tid_skips_reordering(self):
         flush = c_function(self.rx, "reord_flush_tid")
         flush_guard = flush.index("tid >= ARRAY_SIZE")

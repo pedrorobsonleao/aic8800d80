@@ -736,7 +736,7 @@ static inline int rwnx_rx_scanu_result_ind(struct rwnx_hw *rwnx_hw,
 	u8 *ie;
 	size_t ielen;
 	u16 capability, beacon_interval;
-	u16 len = ind->length;
+	u16 len;
 
 #if 0    
 	const u8 *ie = mgmt->u.beacon.variable;
@@ -751,6 +751,17 @@ static inline int rwnx_rx_scanu_result_ind(struct rwnx_hw *rwnx_hw,
 
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
+
+    if (msg->param_len < offsetof(struct scanu_result_ind, payload) ||
+        ind->length < offsetof(struct ieee80211_mgmt,
+                               u.probe_resp.variable) ||
+        ind->length > msg->param_len -
+                      offsetof(struct scanu_result_ind, payload)) {
+        pr_warn("%s: invalid scan result length (%u, payload %u)\n",
+                __func__, ind->length, msg->param_len);
+        return -EMSGSIZE;
+    }
+	len = ind->length;
 	
     chan = ieee80211_get_channel(rwnx_hw->wiphy, ind->center_freq);
 
@@ -821,12 +832,17 @@ static inline int rwnx_rx_scanu_result_ind(struct rwnx_hw *rwnx_hw,
 				goto putbss;
 			}
 		}
-			scan_re_wext = (struct scanu_result_wext *)vmalloc(sizeof(struct scanu_result_wext));
-			scan_re_wext->ind = (struct scanu_result_ind *)vmalloc(sizeof(struct scanu_result_ind));
-			scan_re_wext->payload = (u32_l *)vmalloc(sizeof(u32_l) * ind->length);
-
-			memset(scan_re_wext->ind, 0, sizeof(struct scanu_result_ind));
-			memset(scan_re_wext->payload, 0, ind->length);
+			scan_re_wext = vmalloc(sizeof(*scan_re_wext));
+			if (!scan_re_wext)
+				goto putbss;
+			scan_re_wext->ind = vmalloc(sizeof(*scan_re_wext->ind));
+			scan_re_wext->payload = vmalloc(ind->length);
+			if (!scan_re_wext->ind || !scan_re_wext->payload) {
+				vfree(scan_re_wext->payload);
+				vfree(scan_re_wext->ind);
+				vfree(scan_re_wext);
+				goto putbss;
+			}
 			
 			memcpy(scan_re_wext->ind, ind, sizeof(struct scanu_result_ind));
 			memcpy(scan_re_wext->payload, ind->payload, ind->length);
