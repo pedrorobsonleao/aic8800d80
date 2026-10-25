@@ -33,6 +33,11 @@ Na revisão da árvore atual foram confirmados e corrigidos:
 - Mensagens RX do firmware: valida índices de VIF/STA antes de consultar as
   tabelas em notificações P2P, RSSI, perda de pacotes, conexão/desconexão e
   mesh; também rejeita índices de canal negativos ou fora do array de survey.
+- Teardown USB: para thread/tasklet TX antes da liberação, cancela o trabalho
+  RX e todos os URBs TX do pool, e drena `tx_post_list` liberando SKBs/buffers
+  pendentes antes de destruir o pool. Os trabalhos RX agora são inicializados
+  antes das alocações para que a limpeza de falha parcial possa cancelá-los com
+  segurança.
 
 Validação executada em 2026-10-25: `make -C drivers/aic8800` concluiu com
 sucesso contra `/lib/modules/7.3.0-9-generic/build` (x86_64), inclusive após a
@@ -43,19 +48,18 @@ por falta de `vmlinux`; não houve erro de compilação. Hardware USB e SDIO nã
 foi exercitado, portanto o resultado confirma compilação, não operação em
 runtime.
 
-Na rodada seguinte foram incluídas validações dos índices usados por mensagens
-RX de firmware. As 10 verificações de segurança passaram e `make -C
-drivers/aic8800` compilou novamente os três módulos no mesmo kernel. A
-compilação manteve warnings de fallthrough em caminhos existentes e não gerou
-BTF por falta de `vmlinux`.
+Nas rodadas seguintes foram incluídas validações dos índices usados por
+mensagens RX de firmware e ajustes no teardown USB. As 11 verificações de
+segurança passaram e `make -C drivers/aic8800` compilou novamente os três
+módulos no mesmo kernel. A compilação manteve warnings de fallthrough em
+caminhos existentes e não gerou BTF por falta de `vmlinux`.
 
 Próxima rodada de auditoria recomendada, antes de otimizações:
 
 1. Completar auditoria de comprimentos de frames RX e dos demais índices diretos em handlers de mensagens do firmware.
-2. Rastrear submissão, cancelamento e liberação de URBs durante disconnect USB.
-3. Rastrear lifetime do buffer de comando enfileirado no transporte SDIO.
-4. Revisar cancelamento de timers e alocações sob spinlocks, incluindo teardown.
-5. Auditar os demais itens de memória/cópia e só então revisar performance.
+2. Rastrear lifetime do buffer de comando enfileirado no transporte SDIO.
+3. Revisar cancelamento de timers e alocações sob spinlocks, incluindo teardown.
+4. Auditar os demais itens de memória/cópia e só então revisar performance.
 
 Esses pontos vêm do relatório original e ainda não foram confirmados nesta
 rodada; não devem ser tratados como bugs estabelecidos sem inspeção do caminho

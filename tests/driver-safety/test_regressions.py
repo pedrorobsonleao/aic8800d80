@@ -237,6 +237,26 @@ class DriverSafetyRegressions(unittest.TestCase):
         self.assertLess(mesh_path.index("ind->nhop_sta_idx >= ARRAY_SIZE"),
                         mesh_path.index("sta_table[ind->nhop_sta_idx]"))
 
+    def test_usb_teardown_stops_tx_before_killing_and_freeing_urbs(self):
+        teardown = c_function(self.usb, "aicwf_usb_cancel_all_urbs_")
+        self.assertLess(teardown.index("cancel_work_sync(&usb_dev->rx_urb_work)"),
+                        teardown.index("usb_kill_urb"))
+        self.assertIn("for (i = 0; i < AICWF_USB_TX_URBS; i++)", teardown)
+        self.assertIn("usb_dev->usb_tx_buf[i].urb", teardown)
+
+        deinit = c_function(self.usb, "aicwf_usb_deinit")
+        drain = deinit.index("&usbdev->tx_post_list")
+        free_tx_pool = deinit.index("&usbdev->tx_free_list")
+        self.assertLess(drain, free_tx_pool)
+
+        bus_deinit = c_function((FDRV / "aicwf_txrxif.c").read_text(),
+                                 "aicwf_bus_deinit")
+        stop_thread = bus_deinit.index("kthread_stop(bus_if->bustx_thread)")
+        kill_tasklet = bus_deinit.index("tasklet_kill(&usb->xmit_tasklet)")
+        cancel = bus_deinit.index("aicwf_usb_cancel_all_urbs(usb)")
+        self.assertLess(stop_thread, cancel)
+        self.assertLess(kill_tasklet, cancel)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

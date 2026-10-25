@@ -212,8 +212,18 @@ void aicwf_bus_deinit(struct device *dev)
     bus_if = dev_get_drvdata(dev);
     aicwf_bus_stop(bus_if);
 
+    if (bus_if->bustx_thread) {
+		AICWFDBG(LOGINFO, "%s stop to bustx_thread!! \r\n", __func__);
+		complete_all(&bus_if->bustx_trgg);
+        kthread_stop(bus_if->bustx_thread);
+        bus_if->bustx_thread = NULL;
+    }
+
 #ifdef AICWF_USB_SUPPORT
     usb = bus_if->bus_priv.usb;
+#ifdef CONFIG_TX_TASKLET
+	tasklet_kill(&usb->xmit_tasklet);
+#endif
 	aicwf_usb_cancel_all_urbs(usb);//AIDEN
 
     if(g_rwnx_plat && g_rwnx_plat->enabled){
@@ -242,23 +252,10 @@ void aicwf_bus_deinit(struct device *dev)
         bus_if->cmd_buf = NULL;
     }
 
-    if (bus_if->bustx_thread) {
-		AICWFDBG(LOGINFO, "%s stop to bustx_thread!! \r\n", __func__);
-
-
-		complete_all(&bus_if->bustx_trgg);
-        kthread_stop(bus_if->bustx_thread);
-        bus_if->bustx_thread = NULL;
-    }
-
     if (usb->rx_priv)
         aicwf_rx_deinit(usb->rx_priv);
 
     rwnx_cmd_mgr_deinit(&usb->cmd_mgr);
-
-#ifdef CONFIG_TX_TASKLET//AIDEN tasklet
-	tasklet_kill(&usb->xmit_tasklet);
-#endif
 
 	AICWFDBG(LOGINFO, "%s Exit \n", __func__);
 }

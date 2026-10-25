@@ -1895,40 +1895,26 @@ static int aicwf_usb_bus_start(struct device *dev)
 
 static void aicwf_usb_cancel_all_urbs_(struct aic_usb_dev *usb_dev)
 {
-    struct aicwf_usb_buf *usb_buf, *tmp;
-    unsigned long flags;
+    int i;
+
+    cancel_work_sync(&usb_dev->rx_urb_work);
+#ifdef CONFIG_USB_MSG_IN_EP
+	if (usb_dev->msg_in_pipe)
+		cancel_work_sync(&usb_dev->msg_rx_urb_work);
+#endif
 
     if (usb_dev->msg_out_urb)
         usb_kill_urb(usb_dev->msg_out_urb);
 
-    spin_lock_irqsave(&usb_dev->tx_post_lock, flags);
-    list_for_each_entry_safe(usb_buf, tmp, &usb_dev->tx_post_list, list) {
-        spin_unlock_irqrestore(&usb_dev->tx_post_lock, flags);
-        if (!usb_buf->urb) {
-            usb_err("bad usb_buf\n");
-            spin_lock_irqsave(&usb_dev->tx_post_lock, flags);
-            break;
+    /* TX buffers are removed from tx_post_list while submitted. Kill the
+     * complete pool after TX producers have stopped, including URBs in flight.
+     */
+    if (usb_dev->usb_tx_buf) {
+        for (i = 0; i < AICWF_USB_TX_URBS; i++) {
+            if (usb_dev->usb_tx_buf[i].urb)
+                usb_kill_urb(usb_dev->usb_tx_buf[i].urb);
         }
-        usb_kill_urb(usb_buf->urb);
-        #if defined CONFIG_USB_NO_TRANS_DMA_MAP
-        // free dma buf if needed
-        if (usb_buf->data_buf) {
-            #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35))
-            usb_free_coherent(usb_buf->usbdev->udev, DATA_BUF_MAX, usb_buf->data_buf, usb_buf->data_dma_trans_addr);
-            #else
-            usb_buffer_free(usb_buf->usbdev->udev, DATA_BUF_MAX, usb_buf->data_buf, usb_buf->data_dma_trans_addr);
-            #endif
-            usb_buf->data_buf = NULL;
-            usb_buf->data_dma_trans_addr = 0x0;
-        } else {
-            usb_err("bad usb dma buf\n");
-            spin_lock_irqsave(&usb_dev->tx_post_lock, flags);
-            break;
-        }
-        #endif
-        spin_lock_irqsave(&usb_dev->tx_post_lock, flags);
     }
-    spin_unlock_irqrestore(&usb_dev->tx_post_lock, flags);
 
     usb_kill_anchored_urbs(&usb_dev->rx_submitted);
 #ifdef CONFIG_USB_MSG_IN_EP
@@ -1961,7 +1947,32 @@ static void aicwf_usb_bus_stop(struct device *dev)
 
 static void aicwf_usb_deinit(struct aic_usb_dev *usbdev)
 {
+    struct aicwf_usb_buf *usb_buf;
+
     cancel_work_sync(&usbdev->rx_urb_work);
+#ifdef CONFIG_USB_MSG_IN_EP
+	if (usbdev->msg_in_pipe)
+		cancel_work_sync(&usbdev->msg_rx_urb_work);
+#endif
+
+    while ((usb_buf = aicwf_usb_tx_dequeue(usbdev, &usbdev->tx_post_list,
+                    &usbdev->tx_post_count, &usbdev->tx_post_lock))) {
+#ifndef CONFIG_USB_TX_AGGR
+        if (usb_buf->skb) {
+            if (usb_buf->cfm) {
+#if !defined(CONFIG_USB_NO_TRANS_DMA_MAP)
+                kfree((u8 *)usb_buf->skb);
+#endif
+            } else {
+                dev_kfree_skb_any(usb_buf->skb);
+            }
+            usb_buf->skb = NULL;
+        }
+#endif
+        aicwf_usb_tx_queue(usbdev, &usbdev->tx_free_list, usb_buf,
+                           &usbdev->tx_free_count, &usbdev->tx_free_lock);
+    }
+
     aicwf_usb_free_urb(&usbdev->rx_free_list, &usbdev->rx_free_lock);
     aicwf_usb_free_urb(&usbdev->tx_free_list, &usbdev->tx_free_lock);
 #ifdef CONFIG_USB_MSG_IN_EP
@@ -2025,6 +2036,11 @@ static int aicwf_usb_init(struct aic_usb_dev *usb_dev)
 #endif
 
 	atomic_set(&rx_urb_cnt, 0);
+	INIT_WORK(&usb_dev->rx_urb_work, aicwf_usb_rx_urb_work);
+#ifdef CONFIG_USB_MSG_IN_EP
+	if (usb_dev->msg_in_pipe)
+		INIT_WORK(&usb_dev->msg_rx_urb_work, aicwf_usb_msg_rx_urb_work);
+#endif
 
     usb_dev->tx_free_count = 0;
     usb_dev->tx_post_count = 0;
@@ -2053,13 +2069,6 @@ static int aicwf_usb_init(struct aic_usb_dev *usb_dev)
         ret = ENOMEM;
         goto error;
     }
-
-    INIT_WORK(&usb_dev->rx_urb_work, aicwf_usb_rx_urb_work);
-#ifdef CONFIG_USB_MSG_IN_EP
-	if(usb_dev->msg_in_pipe){
-		INIT_WORK(&usb_dev->msg_rx_urb_work, aicwf_usb_msg_rx_urb_work);
-	}
-#endif
 
     return ret;
     error:
