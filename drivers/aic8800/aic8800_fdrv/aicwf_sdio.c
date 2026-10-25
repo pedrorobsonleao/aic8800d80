@@ -13,6 +13,7 @@
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
 #include <linux/semaphore.h>
+#include <linux/timer.h>
 #include <linux/debugfs.h>
 #include <linux/kthread.h>
 #include "aicwf_txrxif.h"
@@ -519,15 +520,42 @@ static int aicwf_sdio_intr_get_len_bytemode(struct aic_sdio_dev *sdiodev, u8 *by
     return ret;
 }
 
+static void aicwf_sdio_cmd_queue_flush(struct aic_sdio_dev *sdiodev)
+{
+	LIST_HEAD(pending);
+	struct aicwf_cmd_msg *cmd, *next;
+
+	spin_lock_bh(&sdiodev->tx_priv->cmd_lock);
+	list_splice_init(&sdiodev->tx_priv->cmd_queue, &pending);
+	sdiodev->tx_priv->cmd_buf = NULL;
+	sdiodev->tx_priv->cmd_len = 0;
+	sdiodev->tx_priv->cmd_txstate = false;
+	spin_unlock_bh(&sdiodev->tx_priv->cmd_lock);
+
+	list_for_each_entry_safe(cmd, next, &pending, list) {
+		list_del(&cmd->list);
+		kfree(cmd->data);
+		kfree(cmd);
+	}
+
+	wake_up_all(&sdiodev->tx_priv->cmd_txdone_wait);
+}
+
 static void aicwf_sdio_bus_stop(struct device *dev)
 {
     struct aicwf_bus *bus_if = dev_get_drvdata(dev);
     struct aic_sdio_dev *sdiodev = bus_if->bus_priv.sdio;
     int ret;
 
+    bus_if->state = BUS_DOWN_ST;
     aicwf_sdio_pwrctl_timer(sdiodev, 0);
     if(timer_pending(&sdiodev->rwnx_hw->p2p_alive_timer)){
-        ret = del_timer(&sdiodev->rwnx_hw->p2p_alive_timer);}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
+	ret = timer_delete(&sdiodev->rwnx_hw->p2p_alive_timer);
+#else
+	ret = del_timer(&sdiodev->rwnx_hw->p2p_alive_timer);
+#endif
+	}
     sdio_dbg("%s\n",__func__);
     if (sdiodev->pwrctl_tsk) {
         complete(&sdiodev->pwrctrl_trgg);
@@ -537,14 +565,11 @@ static void aicwf_sdio_bus_stop(struct device *dev)
 
     sdio_dbg("%s:pwrctl stopped\n",__func__);
 
-    bus_if->state = BUS_DOWN_ST;
-    ret = down_interruptible(&sdiodev->tx_priv->txctl_sema);
-    if (ret)
-       sdio_err("down txctl_sema fail\n");
+    down(&sdiodev->tx_priv->txctl_sema);
+    aicwf_sdio_cmd_queue_flush(sdiodev);
 
     aicwf_sdio_pwr_stctl(sdiodev, SDIO_SLEEP_ST);
-    if (!ret)
-        up(&sdiodev->tx_priv->txctl_sema);
+    up(&sdiodev->tx_priv->txctl_sema);
     aicwf_frame_queue_flush(&sdiodev->tx_priv->txq);
     sdio_dbg("exit %s\n",__func__);
 }
@@ -621,12 +646,6 @@ static int aicwf_sdio_tx_msg(struct aic_sdio_dev *sdiodev)
 		return -1;
 	}
 
-    sdiodev->tx_priv->cmd_txstate = false;
-    if (!err)
-        sdiodev->tx_priv->cmd_tx_succ= true;
-    else
-        sdiodev->tx_priv->cmd_tx_succ= false;
-
     up(&sdiodev->tx_priv->cmd_txsema);
 
     return err;
@@ -635,6 +654,8 @@ static int aicwf_sdio_tx_msg(struct aic_sdio_dev *sdiodev)
 static void aicwf_sdio_tx_process(struct aic_sdio_dev *sdiodev)
 {
     int err = 0;
+	struct aicwf_cmd_msg *cmd;
+	unsigned long flags;
 
     if (sdiodev->bus_if->state == BUS_DOWN_ST) {
         sdio_err("Bus is down\n");
@@ -645,19 +666,48 @@ static void aicwf_sdio_tx_process(struct aic_sdio_dev *sdiodev)
 
     //config
     sdio_info("send cmd\n");
-    if (sdiodev->tx_priv->cmd_txstate) {
+    if (READ_ONCE(sdiodev->tx_priv->cmd_txstate)) {
         if (down_interruptible(&sdiodev->tx_priv->txctl_sema)) {
             txrx_err("txctl down bus->txctl_sema fail\n");
+			complete(&sdiodev->bus_if->bustx_trgg);
             return;
         }
         if (sdiodev->state != SDIO_ACTIVE_ST) {
             txrx_err("state err\n");
             up(&sdiodev->tx_priv->txctl_sema);
-            txrx_err("txctl up bus->txctl_sema fail\n");
+			aicwf_sdio_cmd_queue_flush(sdiodev);
             return;
         }
 
-        err = aicwf_sdio_tx_msg(sdiodev);
+		for (;;) {
+			spin_lock_irqsave(&sdiodev->tx_priv->cmd_lock, flags);
+			if (list_empty(&sdiodev->tx_priv->cmd_queue)) {
+				sdiodev->tx_priv->cmd_buf = NULL;
+				sdiodev->tx_priv->cmd_len = 0;
+				sdiodev->tx_priv->cmd_txstate = false;
+				spin_unlock_irqrestore(&sdiodev->tx_priv->cmd_lock, flags);
+				break;
+			}
+			cmd = list_first_entry(&sdiodev->tx_priv->cmd_queue,
+					       struct aicwf_cmd_msg, list);
+			list_del(&cmd->list);
+			sdiodev->tx_priv->cmd_buf = cmd->data;
+			sdiodev->tx_priv->cmd_len = cmd->len;
+			spin_unlock_irqrestore(&sdiodev->tx_priv->cmd_lock, flags);
+
+			err = aicwf_sdio_tx_msg(sdiodev);
+			kfree(cmd->data);
+			kfree(cmd);
+
+			spin_lock_irqsave(&sdiodev->tx_priv->cmd_lock, flags);
+			sdiodev->tx_priv->cmd_buf = NULL;
+			sdiodev->tx_priv->cmd_len = 0;
+			sdiodev->tx_priv->cmd_tx_succ = !err;
+			if (list_empty(&sdiodev->tx_priv->cmd_queue))
+				sdiodev->tx_priv->cmd_txstate = false;
+			spin_unlock_irqrestore(&sdiodev->tx_priv->cmd_lock, flags);
+		}
+
         up(&sdiodev->tx_priv->txctl_sema);
         if (waitqueue_active(&sdiodev->tx_priv->cmd_txdone_wait))
             wake_up(&sdiodev->tx_priv->cmd_txdone_wait);
@@ -679,7 +729,7 @@ static void aicwf_sdio_tx_process(struct aic_sdio_dev *sdiodev)
     sdiodev->tx_priv->fw_avail_bufcnt = aicwf_sdio_flow_ctrl(sdiodev);
     while (!aicwf_is_framequeue_empty(&sdiodev->tx_priv->txq)) {
 	aicwf_sdio_send(sdiodev->tx_priv);
-        if(sdiodev->tx_priv->cmd_txstate)
+        if(READ_ONCE(sdiodev->tx_priv->cmd_txstate))
             break;
     }
 
@@ -718,39 +768,34 @@ static int aicwf_sdio_bus_txdata(struct device *dev, struct sk_buff *pkt)
 
 static int aicwf_sdio_bus_txmsg(struct device *dev, u8 *msg, uint msglen)
 {
-//    int ret = -1;
     struct aicwf_bus *bus_if = dev_get_drvdata(dev);
     struct aic_sdio_dev *sdiodev = bus_if->bus_priv.sdio;
+    struct aicwf_cmd_msg *cmd;
+    unsigned long flags;
 
-    down(&sdiodev->tx_priv->cmd_txsema);
-    sdiodev->tx_priv->cmd_txstate = true;
-    sdiodev->tx_priv->cmd_tx_succ = false;
-    sdiodev->tx_priv->cmd_buf = msg;
-    sdiodev->tx_priv->cmd_len = msglen;
-    up(&sdiodev->tx_priv->cmd_txsema);
-
-    if (bus_if->state != BUS_UP_ST) {
+    if (!msg || !msglen || READ_ONCE(bus_if->state) != BUS_UP_ST) {
         sdio_err("bus has stop\n");
-        return -1;
+        return -EIO;
     }
+
+	cmd = kmalloc(sizeof(*cmd), GFP_ATOMIC);
+	if (!cmd)
+		return -ENOMEM;
+	cmd->data = msg;
+	cmd->len = msglen;
+	INIT_LIST_HEAD(&cmd->list);
+
+	spin_lock_irqsave(&sdiodev->tx_priv->cmd_lock, flags);
+	if (READ_ONCE(bus_if->state) != BUS_UP_ST) {
+		spin_unlock_irqrestore(&sdiodev->tx_priv->cmd_lock, flags);
+		kfree(cmd);
+		return -EIO;
+	}
+	list_add_tail(&cmd->list, &sdiodev->tx_priv->cmd_queue);
+	sdiodev->tx_priv->cmd_txstate = true;
+	spin_unlock_irqrestore(&sdiodev->tx_priv->cmd_lock, flags);
 
     complete(&bus_if->bustx_trgg);
-    #if 0
-    if (sdiodev->tx_priv->cmd_txstate) {
-        int timeout = msecs_to_jiffies(CMD_TX_TIMEOUT);
-        ret = wait_event_interruptible_timeout(sdiodev->tx_priv->cmd_txdone_wait, \
-                                            !(sdiodev->tx_priv->cmd_txstate), timeout);
-    }
-
-    if (!sdiodev->tx_priv->cmd_txstate && sdiodev->tx_priv->cmd_tx_succ) {
-        ret = 0;
-    } else {
-        sdio_err("send faild:%d, %d,%x\n", sdiodev->tx_priv->cmd_txstate, sdiodev->tx_priv->cmd_tx_succ, ret);
-        ret = -EIO;
-    }
-
-    return ret;
-    #endif
     return 0;
 }
 
@@ -807,7 +852,8 @@ int aicwf_sdio_send(struct aicwf_tx_priv *tx_priv)
         }
 
         //when aggr finish or there is cmd to send, just send this aggr pkt to fw
-        if ((int)atomic_read(&sdiodev->tx_priv->tx_pktcnt) == 0 || sdiodev->tx_priv->cmd_txstate) { //no more pkt send it!
+        if ((int)atomic_read(&sdiodev->tx_priv->tx_pktcnt) == 0 ||
+	    READ_ONCE(sdiodev->tx_priv->cmd_txstate)) { //no more pkt send it!
             tx_priv->fw_avail_bufcnt -= atomic_read(&tx_priv->aggr_count);
             aicwf_sdio_aggr_send(tx_priv);
         } else
@@ -933,7 +979,8 @@ int sdio_bustx_thread(void *data)
 	    if(sdiodev->bus_if->state == BUS_DOWN_ST)
                 break;
 
-            if((int)(atomic_read(&sdiodev->tx_priv->tx_pktcnt) > 0) || (sdiodev->tx_priv->cmd_txstate == true))
+            if((int)(atomic_read(&sdiodev->tx_priv->tx_pktcnt) > 0) ||
+	       READ_ONCE(sdiodev->tx_priv->cmd_txstate))
                 aicwf_sdio_tx_process(sdiodev);
         }
     }
@@ -974,7 +1021,8 @@ static int aicwf_sdio_pwrctl_thread(void *data)
             if(sdiodev->bus_if->state == BUS_DOWN_ST)
                 break;
 	    if (sdiodev->state == SDIO_ACTIVE_ST) {
-                if((int)(atomic_read(&sdiodev->tx_priv->tx_pktcnt) <= 0) && (sdiodev->tx_priv->cmd_txstate == false) && \
+                if((int)(atomic_read(&sdiodev->tx_priv->tx_pktcnt) <= 0) &&
+		   !READ_ONCE(sdiodev->tx_priv->cmd_txstate) && \
                     atomic_read(&sdiodev->rx_priv->rx_cnt)==0)
                         aicwf_sdio_pwr_stctl(sdiodev, SDIO_SLEEP_ST);
                 else
@@ -1079,15 +1127,19 @@ void aicwf_sdio_pwrctl_timer(struct aic_sdio_dev *sdiodev, uint duration)
     if (sdiodev->bus_if->state == BUS_DOWN_ST && duration)
         return;
 
-    spin_lock_bh(&sdiodev->pwrctl_lock);
     if (!duration) {
-        if (timer_pending(&sdiodev->timer))
-            del_timer_sync(&sdiodev->timer);
-    } else {
-        sdiodev->active_duration = duration;
-        timeout = msecs_to_jiffies(sdiodev->active_duration);
-        mod_timer(&sdiodev->timer, jiffies + timeout);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0))
+		timer_delete_sync(&sdiodev->timer);
+#else
+		del_timer_sync(&sdiodev->timer);
+#endif
+		return;
     }
+
+    spin_lock_bh(&sdiodev->pwrctl_lock);
+	sdiodev->active_duration = duration;
+	timeout = msecs_to_jiffies(sdiodev->active_duration);
+	mod_timer(&sdiodev->timer, jiffies + timeout);
     spin_unlock_bh(&sdiodev->pwrctl_lock);
 }
 
@@ -1210,6 +1262,8 @@ void *aicwf_sdio_bus_init(struct aic_sdio_dev *sdiodev)
     sdiodev->tx_priv = tx_priv;
     aicwf_frame_queue_init(&tx_priv->txq, 8, TXQLEN);
     spin_lock_init(&tx_priv->txqlock);
+    INIT_LIST_HEAD(&tx_priv->cmd_queue);
+    spin_lock_init(&tx_priv->cmd_lock);
     sema_init(&tx_priv->txctl_sema,1);
     sema_init(&tx_priv->cmd_txsema, 1);
     init_waitqueue_head(&tx_priv->cmd_txdone_wait);

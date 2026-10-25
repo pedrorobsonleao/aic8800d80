@@ -83,6 +83,14 @@ struct frame_queue {
     struct sk_buff_head queuelist[8];
 };
 
+#ifdef AICWF_SDIO_SUPPORT
+struct aicwf_cmd_msg {
+	struct list_head list;
+	u8 *data;
+	uint len;
+};
+#endif
+
 #ifdef CONFIG_PREALLOC_RX_SKB
 struct rx_frame_queue {
     u16              qmax;      /* max number of queued frames */
@@ -119,6 +127,8 @@ struct aicwf_tx_priv {
     struct aic_sdio_dev *sdiodev;
     int fw_avail_bufcnt;
     //for cmd tx
+    struct list_head cmd_queue;
+    spinlock_t cmd_lock;
     u8 *cmd_buf;
     uint cmd_len;
     bool cmd_txstate;

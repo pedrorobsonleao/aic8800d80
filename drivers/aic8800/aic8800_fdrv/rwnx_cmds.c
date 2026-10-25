@@ -124,12 +124,13 @@ void rwnx_msg_free_(struct lmac_msg *msg);
 static int cmd_mgr_queue(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
 {
 	int ret = 0;
+    struct rwnx_hw *rwnx_hw;
 #ifdef AICWF_SDIO_SUPPORT
     struct aic_sdio_dev *sdiodev = container_of(cmd_mgr, struct aic_sdio_dev, cmd_mgr);
-#endif
-#ifdef AICWF_USB_SUPPORT
-	
+    rwnx_hw = sdiodev->rwnx_hw;
+#elif defined(AICWF_USB_SUPPORT)
     struct aic_usb_dev *usbdev = container_of(cmd_mgr, struct aic_usb_dev, cmd_mgr);
+    rwnx_hw = usbdev->rwnx_hw;
 #endif
     bool defer_push = false;
     u8_l empty = 0;
@@ -283,12 +284,18 @@ static int cmd_mgr_queue(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
 			list_del(&cmd->list);
 			cmd_mgr->queue_sz--;
 			if(cmd_mgr->queue_sz == 0){
-                rwnx_wakeup_unlock(usbdev->rwnx_hw->ws_tx);
+                rwnx_wakeup_unlock(rwnx_hw->ws_tx);
             }
 			spin_unlock_bh(&cmd_mgr->lock);
 			ret = cmd->result;
 			rwnx_cmd_free(cmd);//kfree(cmd);AIDEN
-            if(!list_empty(&cmd_mgr->cmds) && usbdev->state == USB_UP_ST)
+            if (!list_empty(&cmd_mgr->cmds)
+#ifdef AICWF_SDIO_SUPPORT
+                && sdiodev->bus_if->state == BUS_UP_ST
+#elif defined(AICWF_USB_SUPPORT)
+                && usbdev->state == USB_UP_ST
+#endif
+                )
                 WAKE_CMD_WORK(cmd_mgr);
 		}
         #endif
@@ -368,11 +375,13 @@ void cmd_mgr_task_process(struct work_struct *work)
             break;
 
         if (next) {
+	    struct rwnx_hw *rwnx_hw;
  	    #ifdef AICWF_SDIO_SUPPORT
             struct aic_sdio_dev *sdiodev = container_of(cmd_mgr, struct aic_sdio_dev, cmd_mgr);
-	    #endif
-	    #ifdef AICWF_USB_SUPPORT
+	    rwnx_hw = sdiodev->rwnx_hw;
+	    #elif defined(AICWF_USB_SUPPORT)
     	    struct aic_usb_dev *usbdev = container_of(cmd_mgr, struct aic_usb_dev, cmd_mgr);
+	    rwnx_hw = usbdev->rwnx_hw;
 	    #endif
             next->flags &= ~RWNX_CMD_FLAG_WAIT_PUSH;
 
@@ -402,7 +411,7 @@ void cmd_mgr_task_process(struct work_struct *work)
 				list_del(&next->list);
 				cmd_mgr->queue_sz--;
 				if(cmd_mgr->queue_sz == 0){
-                    rwnx_wakeup_unlock(usbdev->rwnx_hw->ws_tx);
+                    rwnx_wakeup_unlock(rwnx_hw->ws_tx);
                 }
 				spin_unlock_bh(&cmd_mgr->lock);
 				rwnx_cmd_free(next);//kfree(next);AIDEN
@@ -443,8 +452,7 @@ static int cmd_mgr_msgind(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd_e2amsg *
 #ifdef AICWF_SDIO_SUPPORT
     struct aic_sdio_dev *sdiodev = container_of(cmd_mgr, struct aic_sdio_dev, cmd_mgr);
     struct rwnx_hw *rwnx_hw = sdiodev->rwnx_hw;
-#endif
-#ifdef AICWF_USB_SUPPORT
+#elif defined(AICWF_USB_SUPPORT)
     struct aic_usb_dev *usbdev = container_of(cmd_mgr, struct aic_usb_dev, cmd_mgr);
     struct rwnx_hw *rwnx_hw = usbdev->rwnx_hw;
 #endif
@@ -576,6 +584,9 @@ void aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
 {
     u8 *buffer = NULL;
     u16 index = 0;
+#ifdef AICWF_SDIO_SUPPORT
+    int ret;
+#endif
     if (!msg || len < sizeof(*msg) || msg->param_len != len - sizeof(*msg) ||
         len > CMD_BUF_MAX - 8) {
         printk(KERN_ERR "aicwf: invalid command length (%u, param %u)\n",
@@ -585,6 +596,11 @@ void aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
 #ifdef AICWF_SDIO_SUPPORT
 	struct aic_sdio_dev *sdiodev = (struct aic_sdio_dev *)dev;
     struct aicwf_bus *bus = sdiodev->bus_if;
+    buffer = kzalloc(CMD_BUF_MAX + SDIOWIFI_FUNC_BLOCKSIZE, GFP_ATOMIC);
+    if (!buffer) {
+        printk(KERN_ERR "aicwf: failed to allocate SDIO command buffer\n");
+        return;
+    }
 #else
 	struct aic_usb_dev *usbdev = (struct aic_usb_dev *)dev;
 	struct aicwf_bus *bus = NULL;
@@ -593,10 +609,12 @@ void aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
         return;
     }
 	bus = usbdev->bus_if;
-#endif
     buffer = bus->cmd_buf;
+#endif
 
+#ifndef AICWF_SDIO_SUPPORT
     memset(buffer, 0, CMD_BUF_MAX);
+#endif
     buffer[0] = (len+4) & 0x00ff;
     buffer[1] = ((len+4) >> 8) &0x0f;
     buffer[2] = 0x11;
@@ -616,6 +634,14 @@ void aicwf_set_cmd_tx(void *dev, struct lmac_msg *msg, uint len)
     index += 2;
     memcpy(&buffer[index], (u8 *)msg->param, msg->param_len);
 
+#ifdef AICWF_SDIO_SUPPORT
+    ret = aicwf_bus_txmsg(bus, buffer, len + 8);
+    if (ret < 0) {
+        printk(KERN_ERR "aicwf: failed to queue SDIO command (%d)\n", ret);
+        kfree(buffer);
+    }
+#else
     aicwf_bus_txmsg(bus, buffer, len + 8);
+#endif
 }
 

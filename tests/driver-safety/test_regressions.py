@@ -85,6 +85,7 @@ class DriverSafetyRegressions(unittest.TestCase):
         cls.tx = (FDRV / "rwnx_tx.c").read_text(encoding="utf-8")
         cls.rx = (FDRV / "rwnx_rx.c").read_text(encoding="utf-8")
         cls.txrxif = (FDRV / "aicwf_txrxif.c").read_text(encoding="utf-8")
+        cls.sdio = (FDRV / "aicwf_sdio.c").read_text(encoding="utf-8")
         cls.main = (FDRV / "rwnx_main.c").read_text(encoding="utf-8")
         cls.usb = (FDRV / "aicwf_usb.c").read_text(encoding="utf-8")
         cls.cmds = (FDRV / "rwnx_cmds.c").read_text(encoding="utf-8")
@@ -314,6 +315,30 @@ class DriverSafetyRegressions(unittest.TestCase):
         handler = c_function(self.msg_rx, "rwnx_rx_handle_msg")
         self.assertIn("handler = rwnx_msg_handler_get(msg->id)", handler)
         self.assertNotIn("msg_hdlrs[MSG_T(msg->id)]", handler)
+
+    def test_sdio_commands_own_buffers_until_worker_sends_them(self):
+        set_cmd = c_function(self.cmds, "aicwf_set_cmd_tx")
+        self.assertIn("kzalloc(CMD_BUF_MAX + SDIOWIFI_FUNC_BLOCKSIZE, GFP_ATOMIC)",
+                      set_cmd)
+        self.assertLess(set_cmd.index("kzalloc(CMD_BUF_MAX"),
+                        set_cmd.index("aicwf_bus_txmsg(bus, buffer"))
+        self.assertIn("if (ret < 0)", set_cmd)
+        self.assertIn("kfree(buffer)", set_cmd)
+
+        enqueue = c_function(self.sdio, "aicwf_sdio_bus_txmsg")
+        self.assertLess(enqueue.index("list_add_tail(&cmd->list"),
+                        enqueue.index("complete(&bus_if->bustx_trgg)"))
+
+        worker = c_function(self.sdio, "aicwf_sdio_tx_process")
+        pop = worker.index("list_del(&cmd->list)")
+        send = worker.index("aicwf_sdio_tx_msg(sdiodev)", pop)
+        free = worker.index("kfree(cmd->data)", send)
+        self.assertLess(pop, send)
+        self.assertLess(send, free)
+
+        teardown = c_function(self.sdio, "aicwf_sdio_bus_stop")
+        self.assertLess(teardown.index("down(&sdiodev->tx_priv->txctl_sema)"),
+                        teardown.index("aicwf_sdio_cmd_queue_flush(sdiodev)"))
 
 
 if __name__ == "__main__":

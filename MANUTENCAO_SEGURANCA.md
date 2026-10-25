@@ -79,7 +79,7 @@ os testes de runtime.
    exercitar entradas malformadas em hardware/sob sanitizadores; classificar
    como correção parcial com risco residual.
 
-3. **Buffer de comando SDIO — risco de sobrescrita concorrente confirmado; correção pendente.**
+3. **Buffer de comando SDIO — corrigido; validação em hardware pendente.**
    `aicwf_set_cmd_tx()` serializa cada mensagem no único `bus->cmd_buf` antes de
    chamar `aicwf_bus_txmsg()`. No SDIO, `aicwf_sdio_bus_txmsg()` publica esse
    mesmo ponteiro em `tx_priv->cmd_buf`, sinaliza o worker e retorna antes da
@@ -88,10 +88,14 @@ os testes de runtime.
    segunda chamada concorrente pode sobrescrever os bytes enquanto o worker
    ainda os consome. A mensagem original `a2e_msg` é copiada durante a
    serialização; o problema é a propriedade do buffer compartilhado.
-   Implementar uma fila de mensagens SDIO com buffer próprio por comando (ou
-   protocolo equivalente que serialize preenchimento e consumo), incluindo
-   limpeza em falha/teardown. Validar build SDIO e caminhos simultâneos antes de
-   fechar o item; o hardware SDIO não está disponível nesta máquina.
+   O SDIO agora enfileira cada comando com buffer de propriedade exclusiva;
+   o worker transmite e libera cada entrada, e o teardown drena a fila depois
+   de parar o worker. A alocação ocorre antes de publicar a entrada e é desfeita
+   se o barramento parar ou a alocação falhar. Os objetos `aicwf_sdio.o`,
+   `aicwf_txrxif.o` e `rwnx_cmds.o` compilaram com SDIO e USB habilitados e
+   prealloc desabilitado, e a regressão estrutural verifica ownership e flush.
+   O hardware SDIO não está disponível; concorrência e teardown ainda precisam
+   de validação funcional em dispositivo.
 
 4. **Timers TCP ACK — teardown requer revisão de sincronização.**
    `tcp_ack_deinit()` desabilita o gerenciador e usa `del_timer()`/`timer_delete()`
@@ -129,8 +133,8 @@ com sucesso o módulo alterado no kernel `7.3.0-9-generic`. Não foram injetados
 frames malformados em hardware nem usados KASAN/UBSAN; a auditoria dos tamanhos
 mínimos lidos por cada callback continua aberta.
 
-Priorizar o buffer SDIO e o teardown dos timers TCP ACK antes de otimizações de
-performance. Depois, continuar a auditoria dos campos lidos por callbacks RX e
+Priorizar o teardown dos timers TCP ACK antes de otimizações de performance.
+Depois, continuar a auditoria dos campos lidos por callbacks RX e
 dos demais itens de memória/cópia do relatório original; as medições atuais de
 throughput não cobrem frames malformados ou transporte SDIO.
 

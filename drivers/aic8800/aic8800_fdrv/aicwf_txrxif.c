@@ -368,7 +368,9 @@ static bool aicwf_another_ptk_1(struct rx_buff *buffer)
     }
     return true;
 }
-#else
+#endif
+
+#if !defined(CONFIG_PREALLOC_RX_SKB) || defined(AICWF_SDIO_SUPPORT)
 static bool aicwf_another_ptk(struct sk_buff *skb)
 {
 	return skb && aicwf_rx_pkt_len_valid(skb->data, skb->len);
