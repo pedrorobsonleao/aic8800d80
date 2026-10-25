@@ -30,6 +30,7 @@
 #define RWNX_CMD_FLAG_WAIT_ACK      BIT(3)
 #define RWNX_CMD_FLAG_WAIT_CFM      BIT(4)
 #define RWNX_CMD_FLAG_DONE          BIT(5)
+#define RWNX_CMD_FLAG_CFM_INVALID   BIT(6)
 /* ATM IPC design makes it possible to get the CFM before the ACK,
  * otherwise this could have simply been a state enum */
 #define RWNX_CMD_WAIT_COMPLETE(flags) \
@@ -76,6 +77,7 @@ struct rwnx_cmd {
     lmac_msg_id_t reqid;
     struct rwnx_cmd_a2emsg *a2e_msg;
     char *e2a_msg;
+    size_t e2a_msg_len;
     u32 tkn;
     u16 flags;
 

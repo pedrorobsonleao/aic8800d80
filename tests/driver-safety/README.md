@@ -8,6 +8,8 @@ python3 -m unittest discover -s tests/driver-safety -p 'test_*.py'
 
 They cover the fixes for TX SKB ownership, AMSDU bounds, USB probe cleanup,
 command-buffer size, TCP ACK allocation failure, and RX reorder TID bounds.
+They also check that typed firmware-confirmation buffers carry their capacities
+and oversized responses fail before reaching callbacks or copies.
 They need no hardware or root privileges and fail if the guarded source
 contracts are removed or reordered.
 

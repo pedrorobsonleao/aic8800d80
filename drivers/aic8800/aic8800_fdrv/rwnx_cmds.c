@@ -55,7 +55,8 @@ static void cmd_complete(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
         rwnx_cmd_free(cmd);//kfree(cmd);AIDEN
     } else {
         if (RWNX_CMD_WAIT_COMPLETE(cmd->flags)) {
-            cmd->result = 0;
+            if (!(cmd->flags & RWNX_CMD_FLAG_CFM_INVALID))
+                cmd->result = 0;
             complete(&cmd->complete);
         }
     }
@@ -285,6 +286,7 @@ static int cmd_mgr_queue(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
                 rwnx_wakeup_unlock(usbdev->rwnx_hw->ws_tx);
             }
 			spin_unlock_bh(&cmd_mgr->lock);
+			ret = cmd->result;
 			rwnx_cmd_free(cmd);//kfree(cmd);AIDEN
             if(!list_empty(&cmd_mgr->cmds) && usbdev->state == USB_UP_ST)
                 WAKE_CMD_WORK(cmd_mgr);
@@ -449,6 +451,9 @@ static int cmd_mgr_msgind(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd_e2amsg *
     struct rwnx_cmd *cmd, *pos;
     bool found = false;
 
+    if (WARN_ON(msg->param_len > RWNX_CMD_E2AMSG_LEN_MAX))
+        msg->param_len = RWNX_CMD_E2AMSG_LEN_MAX;
+
    // RWNX_DBG(RWNX_FN_ENTRY_STR);
 #ifdef CREATE_TRACE_POINTS
     trace_msg_recv(msg->id);
@@ -459,15 +464,21 @@ static int cmd_mgr_msgind(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd_e2amsg *
         if (cmd->reqid == msg->id &&
             (cmd->flags & RWNX_CMD_FLAG_WAIT_CFM)) {
 
+            if (cmd->e2a_msg && msg->param_len > cmd->e2a_msg_len) {
+                pr_warn_ratelimited("oversized CFM %u: %u > %zu\n", msg->id,
+                       msg->param_len, cmd->e2a_msg_len);
+                found = true;
+                cmd->result = -EMSGSIZE;
+                cmd->flags |= RWNX_CMD_FLAG_CFM_INVALID;
+                cmd->flags &= ~RWNX_CMD_FLAG_WAIT_CFM;
+                if (RWNX_CMD_WAIT_COMPLETE(cmd->flags))
+                    cmd_complete(cmd_mgr, cmd);
+                break;
+            }
+
             if (!cmd_mgr_run_callback(rwnx_hw, cmd, msg, cb)) {
                 found = true;
                 cmd->flags &= ~RWNX_CMD_FLAG_WAIT_CFM;
-
-                if (WARN((msg->param_len > RWNX_CMD_E2AMSG_LEN_MAX),
-                         "Unexpect E2A msg len %d > %d\n", msg->param_len,
-                         RWNX_CMD_E2AMSG_LEN_MAX)) {
-                    msg->param_len = RWNX_CMD_E2AMSG_LEN_MAX;
-                }
 
                 if (cmd->e2a_msg && msg->param_len)
                     memcpy(cmd->e2a_msg, &msg->param, msg->param_len);

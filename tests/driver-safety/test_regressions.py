@@ -56,6 +56,29 @@ def c_block(source, marker):
     raise AssertionError(f"block is unbalanced: {marker}")
 
 
+def c_call_arguments(source, name):
+    masked = mask_comments_and_strings(source)
+    calls = []
+    for match in re.finditer(r"\b" + re.escape(name) + r"\s*\(", masked):
+        opening = masked.find("(", match.start())
+        depth = 0
+        args = []
+        arg_start = opening + 1
+        for index in range(opening, len(masked)):
+            if masked[index] == "(":
+                depth += 1
+            elif masked[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    args.append(source[arg_start:index].strip())
+                    break
+            elif masked[index] == "," and depth == 1:
+                args.append(source[arg_start:index].strip())
+                arg_start = index + 1
+        calls.append(args)
+    return calls
+
+
 class DriverSafetyRegressions(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -63,6 +86,8 @@ class DriverSafetyRegressions(unittest.TestCase):
         cls.rx = (FDRV / "rwnx_rx.c").read_text(encoding="utf-8")
         cls.usb = (FDRV / "aicwf_usb.c").read_text(encoding="utf-8")
         cls.cmds = (FDRV / "rwnx_cmds.c").read_text(encoding="utf-8")
+        cls.cmds_h = (FDRV / "rwnx_cmds.h").read_text(encoding="utf-8")
+        cls.msg_tx = (FDRV / "rwnx_msg_tx.c").read_text(encoding="utf-8")
         cls.tcp_ack = (FDRV / "aicwf_tcp_ack.c").read_text(encoding="utf-8")
 
     def test_consumed_tx_skb_is_not_returned_as_busy(self):
@@ -121,6 +146,40 @@ class DriverSafetyRegressions(unittest.TestCase):
         process = c_function(self.rx, "reord_process_unit")
         self.assertIn("tid >= ARRAY_SIZE", process)
         self.assertIn("return reord_single_frame_ind(rx_priv, pframe)", process)
+
+    def test_all_confirmation_destinations_pass_their_object_size(self):
+        old_calls = c_call_arguments(self.msg_tx, "rwnx_send_msg")
+        old_calls = [call for call in old_calls if call[-1] != "void *cfm"]
+        self.assertGreater(len(old_calls), 0)
+        for call in old_calls:
+            with self.subTest(call=call):
+                self.assertEqual(call[-1], "NULL")
+
+        sized_calls = c_call_arguments(self.msg_tx, "rwnx_send_msg_sized")
+        call_sites = [call for call in sized_calls if len(call) == 6 and call[-1] != "size_t cfm_len"]
+        self.assertGreaterEqual(len(call_sites), 50)
+        self.assertTrue(all("sizeof(" in call[-1] or call[-1] == "0" for call in call_sites))
+        self.assertIn("size_t e2a_msg_len", self.cmds_h)
+        self.assertIn("cmd->e2a_msg_len = cfm ? cfm_len : 0", self.msg_tx)
+
+    def test_oversized_confirmation_fails_before_callback_or_copy(self):
+        function = c_function(self.cmds, "cmd_mgr_msgind")
+        protocol_cap = function.index("msg->param_len > RWNX_CMD_E2AMSG_LEN_MAX")
+        check = function.index("msg->param_len > cmd->e2a_msg_len")
+        callback = function.index("cmd_mgr_run_callback")
+        copy = function.index("memcpy(cmd->e2a_msg")
+        self.assertLess(protocol_cap, callback)
+        self.assertLess(check, callback)
+        self.assertLess(callback, copy)
+        failure_path = function[check:callback]
+        self.assertIn("cmd->result = -EMSGSIZE", failure_path)
+        self.assertIn("RWNX_CMD_FLAG_CFM_INVALID", failure_path)
+        self.assertIn("cmd->flags &= ~RWNX_CMD_FLAG_WAIT_CFM", failure_path)
+
+        queue = c_function(self.cmds, "cmd_mgr_queue")
+        result = queue.index("ret = cmd->result")
+        free = queue.index("rwnx_cmd_free(cmd)", result)
+        self.assertLess(result, free)
 
 
 if __name__ == "__main__":

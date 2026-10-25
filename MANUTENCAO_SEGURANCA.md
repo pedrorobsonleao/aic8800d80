@@ -26,13 +26,19 @@ Na revisão da árvore atual foram confirmados e corrigidos:
   transmite pelo caminho TX normal sem filtro de ACK.
 - Reordenação RX: valida TID contra as 8 entradas de `preorder_ctrl`; TIDs fora
   do intervalo seguem sem reordenação, evitando índice fora dos limites.
+- Confirmações do firmware: os chamadores passam a capacidade real dos buffers;
+  o tamanho do protocolo é limitado antes de callbacks, e respostas maiores
+  que o destino são rejeitadas antes da cópia, completam o comando com
+  `-EMSGSIZE` e propagam esse erro ao chamador.
 
 Validação executada em 2026-10-25: `make -C drivers/aic8800` concluiu com
 sucesso contra `/lib/modules/7.3.0-9-generic/build` (x86_64), inclusive após a
-proteção de TID, gerando os três módulos. A compilação emitiu warnings de
-fallthrough em outros caminhos e não gerou BTF por falta de `vmlinux`; não
-houve erro de compilação. Hardware USB e SDIO não foi exercitado, portanto o
-resultado confirma compilação, não operação em runtime.
+proteção de TID e o limite de tamanho das confirmações, gerando os três módulos.
+As 8 verificações em `tests/driver-safety` e os 8 testes do instalador passaram.
+A compilação emitiu warnings de fallthrough em outros caminhos e não gerou BTF
+por falta de `vmlinux`; não houve erro de compilação. Hardware USB e SDIO não
+foi exercitado, portanto o resultado confirma compilação, não operação em
+runtime.
 
 O achado de cópia da confirmação em `cmd->e2a_msg` continua **a confirmar e
 pendente de correção**. O protocolo limita o tamanho da mensagem, mas a API do
