@@ -970,6 +970,14 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
 
     RWNX_DBG(RWNX_FN_ENTRY_STR);
 
+    if (msg->param_len < sizeof(*ind))
+        return -EMSGSIZE;
+
+    if (ind->assoc_req_ie_len > sizeof(ind->assoc_ie_buf) ||
+        ind->assoc_rsp_ie_len > sizeof(ind->assoc_ie_buf) -
+                                ind->assoc_req_ie_len)
+        return -EMSGSIZE;
+
     if (ind->vif_idx >= NX_VIRT_DEV_MAX ||
         ind->ap_idx >= ARRAY_SIZE(rwnx_hw->sta_table))
         return 1;
@@ -999,6 +1007,14 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         u8 txq_status;
         struct cfg80211_chan_def chandef;
 
+        if (ind->ch_idx >= NX_CHAN_CTXT_CNT ||
+            ind->width >= PHY_CHNL_BW_OTHER)
+            return -EINVAL;
+
+        chan = ieee80211_get_channel(rwnx_hw->wiphy, ind->center_freq);
+        if (!chan)
+            return -EINVAL;
+
         sta->valid = true;
         sta->sta_idx = ind->ap_idx;
         sta->ch_idx = ind->ch_idx;
@@ -1015,7 +1031,6 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         sta->center_freq2 = ind->center_freq2;
         rwnx_vif->sta.ap = sta;
 
-        chan = ieee80211_get_channel(rwnx_hw->wiphy, ind->center_freq);
         cfg80211_chandef_create(&chandef, chan, NL80211_CHAN_NO_HT);
         if (!rwnx_hw->mod_params->ht_on)
             chandef.width = NL80211_CHAN_WIDTH_20_NOHT;
@@ -1089,7 +1104,8 @@ static inline int rwnx_rx_sm_connect_ind(struct rwnx_hw *rwnx_hw,
         // If there are 1 sta and 1 monitor interface active at the same time then
         // monitor interface channel context is always the same as the STA interface.
         // This doesn't work with 2 STA interfaces but we don't want to support it.
-        if (rwnx_hw->monitor_vif != RWNX_INVALID_VIF) {
+        if (rwnx_hw->monitor_vif < NX_VIRT_DEV_MAX &&
+            rwnx_hw->monitor_vif != RWNX_INVALID_VIF) {
             struct rwnx_vif *rwnx_mon_vif = rwnx_hw->vif_table[rwnx_hw->monitor_vif];
             rwnx_chanctx_unlink(rwnx_mon_vif);
             rwnx_chanctx_link(rwnx_mon_vif, ind->ch_idx, NULL);
@@ -1242,6 +1258,9 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
     struct aicwf_rx_priv *rx_priv;
 #endif
 
+    if (msg->param_len < sizeof(*ind))
+        return -EMSGSIZE;
+
     if (ind->vif_idx >= NX_VIRT_DEV_MAX)
         return 1;
     rwnx_vif = rwnx_hw->vif_table[ind->vif_idx];
@@ -1249,6 +1268,12 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
         AICWFDBG(LOGERROR, "%s rwnx_vif is null for index %u\n",
                  __func__, ind->vif_idx);
         return 1;
+    }
+    if (rwnx_vif->wdev.iftype == NL80211_IFTYPE_AP ||
+        rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_GO) {
+        netdev_warn(rwnx_vif->ndev,
+                    "Ignoring station disconnect indication for AP interface\n");
+        return -EINVAL;
     }
 
     //RWNX_DBG(RWNX_FN_ENTRY_STR);
@@ -1314,8 +1339,6 @@ static inline int rwnx_rx_sm_disconnect_ind(struct rwnx_hw *rwnx_hw,
             }
         }
     }
-    else if((rwnx_vif->wdev.iftype == NL80211_IFTYPE_AP) || (rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_GO))
-        BUG();//should be not here: del_sta function
 #endif
 
     rwnx_txq_sta_deinit(rwnx_hw, rwnx_vif->sta.ap);
@@ -1343,6 +1366,11 @@ static inline int rwnx_rx_sm_external_auth_required_ind(struct rwnx_hw *rwnx_hw,
     struct sm_external_auth_required_ind *ind =
         (struct sm_external_auth_required_ind *)msg->param;
     struct rwnx_vif *rwnx_vif;
+
+    if (msg->param_len < sizeof(*ind) ||
+        ind->ssid.length > MAC_SSID_LEN)
+        return -EMSGSIZE;
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0) || defined(CONFIG_WPA3_FOR_OLD_KERNEL)
     struct net_device *dev;
     struct cfg80211_external_auth_params params;

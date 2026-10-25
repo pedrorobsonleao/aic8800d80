@@ -203,6 +203,28 @@ class DriverSafetyRegressions(unittest.TestCase):
         self.assertLess(detector, pulse_array)
         self.assertIn("pulses->cnt > RADAR_PULSE_MAX", radar)
 
+    def test_station_state_callbacks_bound_payload_and_association_ie_lengths(self):
+        connect = c_function(self.msg_rx, "rwnx_rx_sm_connect_ind")
+        base_check = connect.index("msg->param_len < sizeof(*ind)")
+        ie_check = connect.index("ind->assoc_req_ie_len > sizeof(ind->assoc_ie_buf)")
+        pointers = connect.index("req_ie = (const u8 *)ind->assoc_ie_buf")
+        self.assertLess(base_check, ie_check)
+        self.assertLess(ie_check, pointers)
+        self.assertIn("ind->assoc_rsp_ie_len > sizeof(ind->assoc_ie_buf) -", connect)
+        self.assertIn("ind->width >= PHY_CHNL_BW_OTHER", connect)
+        self.assertIn("if (!chan)", connect)
+
+        disconnect = c_function(self.msg_rx, "rwnx_rx_sm_disconnect_ind")
+        self.assertLess(disconnect.index("msg->param_len < sizeof(*ind)"),
+                        disconnect.index("ind->vif_idx >= NX_VIRT_DEV_MAX"))
+        self.assertIn("Ignoring station disconnect indication for AP interface", disconnect)
+        self.assertNotIn("BUG()", disconnect)
+
+        auth = c_function(self.msg_rx, "rwnx_rx_sm_external_auth_required_ind")
+        self.assertLess(auth.index("msg->param_len < sizeof(*ind)"),
+                        auth.index("ind->vif_idx >= NX_VIRT_DEV_MAX"))
+        self.assertIn("ind->ssid.length > MAC_SSID_LEN", auth)
+
     def test_reorder_tid_is_bounded_and_invalid_tid_skips_reordering(self):
         flush = c_function(self.rx, "reord_flush_tid")
         flush_guard = flush.index("tid >= ARRAY_SIZE")
